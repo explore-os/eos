@@ -18,6 +18,15 @@ enum Action {
     List,
     Cleanup,
     Send { path: PathBuf, msg: String },
+    Kill { path: PathBuf },
+    Shutdown,
+}
+
+fn kill(pid: usize) -> anyhow::Result<()> {
+    Ok(nix::sys::signal::kill(
+        nix::unistd::Pid::from_raw(pid as i32),
+        nix::sys::signal::Signal::SIGKILL,
+    )?)
 }
 
 fn notify(pid: usize) -> anyhow::Result<()> {
@@ -66,6 +75,15 @@ fn main() -> anyhow::Result<()> {
                     .join(format!("{id}::{}.json", nanoid!())),
                 serde_json::to_string_pretty(&serde_json::from_str::<serde_json::Value>(&msg)?)?,
             )?;
+        }
+        Action::Kill { path } => {
+            let actor_pid_string = std::fs::read_to_string(path.join(".pid"))?;
+            let actor_pid = actor_pid_string.parse::<usize>()?;
+            kill(actor_pid)?;
+            cleanup(pid)?;
+        }
+        Action::Shutdown => {
+            kill(pid)?;
         }
     }
     Ok(())
