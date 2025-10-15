@@ -6,4 +6,4 @@ RUN apt-get update && \
 
 RUN mkdir -p /var/actors && chown vscode:vscode -R /var/actors
 
-WORKDIR /workspaces
+WORKDIR /workspace

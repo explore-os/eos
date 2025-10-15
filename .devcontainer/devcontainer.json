@@ -3,10 +3,14 @@
   "build": {
     "dockerfile": "Dockerfile"
   },
-  "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/${localWorkspaceFolderBasename},type=bind",
-  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
-  "settings": {
-    "terminal.integrated.defaultProfile.linux": "fish"
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspace/${localWorkspaceFolderBasename},type=bind",
+  "workspaceFolder": "/workspace/${localWorkspaceFolderBasename}",
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "terminal.integrated.defaultProfile.linux": "fish"
+      }
+    }
   },
   "remoteUser": "vscode",
   "postCreateCommand": "echo 'Devcontainer is ready.'"
