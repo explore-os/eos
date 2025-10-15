@@ -1,0 +1,13 @@
+{
+  "name": "Custom Dev Container",
+  "build": {
+    "dockerfile": "Dockerfile"
+  },
+  "workspaceMount": "source=${localWorkspaceFolder},target=/workspaces/${localWorkspaceFolderBasename},type=bind",
+  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+  "settings": {
+    "terminal.integrated.defaultProfile.linux": "fish"
+  },
+  "remoteUser": "vscode",
+  "postCreateCommand": "echo 'Devcontainer is ready.'"
+}
