@@ -2,12 +2,12 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use clap::Parser;
+use eos::Message;
 use nanoid::nanoid;
 use rune::runtime::Object;
 use rune::termcolor::{ColorChoice, StandardStream};
 use rune::{Context, ContextError, Diagnostics, Module, Source, Sources, Vm};
 use serde::{Deserialize, Serialize};
-use supervisor::Message;
 use tokio::signal::unix::{SignalKind, signal};
 
 #[derive(Debug, Parser, Serialize, Deserialize)]

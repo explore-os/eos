@@ -2,8 +2,8 @@ use std::path::{Path, PathBuf};
 
 use anyhow::bail;
 use clap::{Parser, Subcommand};
+use eos::{ACTOR_DIR, PAUSE_FILE, Props, ROOT, SEND_DIR, SPAWN_DIR};
 use nanoid::nanoid;
-use supervisor::{ACTOR_DIR, PAUSE_FILE, Props, ROOT, SEND_DIR, SPAWN_DIR};
 
 #[derive(Parser)]
 struct Cli {
@@ -21,6 +21,8 @@ enum Action {
     Unpause { path: PathBuf },
     Send { path: PathBuf, msg: String },
     Kill { path: PathBuf },
+    SetTick { seconds: u64 },
+    ResetTick,
 }
 
 fn kill(pid: usize) -> anyhow::Result<()> {
@@ -132,6 +134,8 @@ fn main() -> anyhow::Result<()> {
             }
             std::fs::remove_file(path.join(PAUSE_FILE))?;
         }
+        Action::SetTick { seconds } => std::fs::write(root.join(".tick"), seconds.to_string())?,
+        Action::ResetTick => std::fs::remove_file(root.join(".tick")),
     }
     Ok(())
 }

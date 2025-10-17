@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-supervisor = { version = "0.1.0", path = "../supervisor" }
+eos = { version = "0.1.0", path = "../eos" }
 
 anyhow = "1.0.79"
 clap = { version = "4.5.1", features = ["derive"] }

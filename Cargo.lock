@@ -301,7 +301,6 @@ dependencies = [
  "serde",
  "serde_json",
  "shellexpand",
- "supervisor",
 ]
 
 [[package]]
@@ -1211,6 +1210,7 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "eos",
  "faccess",
  "indexmap",
  "lazy_static",
@@ -1221,7 +1221,6 @@ dependencies = [
  "serde",
  "serde_json",
  "stringlit",
- "supervisor",
  "syslog",
  "tokio",
  "tokio-stream",
