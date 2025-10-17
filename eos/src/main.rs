@@ -17,43 +17,33 @@ struct Cli {
 enum Action {
     Script {
         script: PathBuf,
-        #[arg(short, long)]
-        copy: Option<Vec<PathBuf>>,
-        #[arg(short, long)]
-        args: Option<Vec<String>>,
+        // #[arg(short, long)]
+        // copy: Option<Vec<PathBuf>>,
+        // #[arg(short, long)]
+        // args: Option<Vec<String>>,
     },
     Spawn {
         path: PathBuf,
-        #[arg(short, long)]
-        copy: Option<Vec<PathBuf>>,
-        #[arg(short, long)]
-        args: Option<Vec<String>>,
+        // #[arg(short, long)]
+        // copy: Option<Vec<PathBuf>>,
+        // #[arg(short, long)]
+        // args: Option<Vec<String>>,
     },
     List,
-    Cleanup,
-    #[command(alias = "p")]
-    Pause,
-    #[command(alias = "u")]
-    Unpause,
-    #[command(alias = "pa")]
-    PauseActor {
+    Refresh,
+    Pause {
         path: PathBuf,
     },
-    #[command(alias = "ua")]
-    UnpauseActor {
+    Unpause {
         path: PathBuf,
     },
-    #[command(aliases = ["-", "s"])]
     Send {
         path: PathBuf,
         msg: String,
     },
-    #[command(alias = "k")]
     Kill {
         path: PathBuf,
     },
-    Shutdown,
-    Start,
 }
 
 fn kill(pid: usize) -> anyhow::Result<()> {
@@ -89,14 +79,15 @@ fn main() -> anyhow::Result<()> {
         eprintln!("Actor system is not running!");
     }
     match command {
-        Action::Start => {}
-        Action::Cleanup => cleanup(get_root_pid(root)?)?,
-        Action::Script { script, args, copy } => {
-            let mut script_copy = vec![script];
-            script_copy.extend(copy.unwrap_or_default().into_iter());
+        Action::Refresh => cleanup(get_root_pid(root)?)?,
+        Action::Script { script } => {
+            let mut script_copy = vec![std::fs::canonicalize(PathBuf::from(shellexpand::full(
+                script,
+            )?))?];
+            // script_copy.extend(copy.unwrap_or_default().into_iter());
             let props = Props {
                 path: PathBuf::from("/usr/local/bin/script-actor"),
-                args: args.unwrap_or_default(),
+                args: Vec::new(),
                 copy: script_copy,
             };
             std::fs::write(
@@ -105,9 +96,9 @@ fn main() -> anyhow::Result<()> {
             )?;
             notify(get_root_pid(root)?)?;
         }
-        Action::Spawn { path, args, copy } => {
+        Action::Spawn { path } => {
             let props = Props {
-                path,
+                path: std::fs::canonicalize(PathBuf::from(shellexpand::full(path)?))?,
                 args: args.unwrap_or_default(),
                 copy: copy.unwrap_or_default(),
             };
@@ -154,23 +145,17 @@ fn main() -> anyhow::Result<()> {
         Action::Shutdown => {
             kill(get_root_pid(root)?)?;
         }
-        Action::PauseActor { path } => {
+        Action::Pause { path } => {
             if !path.join(".pid").exists() {
                 bail!("There is no actor running in the specified directory!");
             }
             std::fs::File::create(path.join(PAUSE_FILE))?;
         }
-        Action::UnpauseActor { path } => {
+        Action::Unpause { path } => {
             if !path.join(".pid").exists() {
                 bail!("There is no actor running in the specified directory!");
             }
             std::fs::remove_file(path.join(PAUSE_FILE))?;
-        }
-        Action::Pause => {
-            std::fs::File::create(root.join(PAUSE_FILE))?;
-        }
-        Action::Unpause => {
-            std::fs::remove_file(root.join(PAUSE_FILE))?;
         }
     }
     Ok(())

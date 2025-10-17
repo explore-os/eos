@@ -10,4 +10,5 @@ nanoid = "0.4.0"
 nix = { version = "0.30.1", features = ["signal"] }
 serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
+shellexpand = { version = "3.1.1", features = ["full"] }
 supervisor = { version = "0.1.0", path = "../supervisor" }
