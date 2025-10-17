@@ -118,6 +118,9 @@ fn main() -> anyhow::Result<()> {
             notify(get_root_pid(root)?)?;
         }
         Action::List => {
+            if !root.join(".pid").exists() {
+                bail!("The actor system isn't running!");
+            }
             cleanup(get_root_pid(&root)?)?;
             let mut entries = std::fs::read_dir(root.join(ACTOR_DIR))?;
             while let Some(Ok(dir)) = entries.next() {
