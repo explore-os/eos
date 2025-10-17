@@ -81,9 +81,9 @@ fn main() -> anyhow::Result<()> {
     match command {
         Action::Refresh => cleanup(get_root_pid(root)?)?,
         Action::Script { script } => {
-            let mut script_copy = vec![std::fs::canonicalize(PathBuf::from(shellexpand::full(
-                &script,
-            )?))?];
+            let mut script_copy = vec![std::fs::canonicalize(PathBuf::from(
+                shellexpand::full(&script)?.to_string(),
+            ))?];
             // script_copy.extend(copy.unwrap_or_default().into_iter());
             let props = Props {
                 path: PathBuf::from("/usr/local/bin/script-actor"),
@@ -98,7 +98,7 @@ fn main() -> anyhow::Result<()> {
         }
         Action::Spawn { path } => {
             let props = Props {
-                path: std::fs::canonicalize(PathBuf::from(shellexpand::full(&path)?))?,
+                path: std::fs::canonicalize(PathBuf::from(shellexpand::full(&path)?.to_string()))?,
                 args: args.unwrap_or_default(),
                 copy: copy.unwrap_or_default(),
             };
