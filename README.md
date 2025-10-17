@@ -58,6 +58,12 @@ use all the pre-existing tools to monitor and inspect the system while it's runn
 The easiest way to get started is by cloning the [eos-playground](https://github.com/hardliner66/eos-play)
 and opening it in vscode. The playground uses a devcontainer to set everything up properly and put you
 directly into a working environment.
+
+If you want to try something bigger or want to save your code in git, then its better to create a new repo
+based on this. Thats why the project is configured as a template. Just use the green "Use this template" button
+at the top to create your own playground
+
+If you just want to play around a bit, you can just clone the repository and try it out:
 ```sh
 git clone https://github.com/hardliner66/eos-play
 code eos-play
@@ -71,7 +77,7 @@ a running `script-actor` that writes the last message it received into its state
 
 The easiest way to run your own actors is by spawning the script-actor with your custom [rune](https://rune-rs.github.io/) script.
 ```sh
-act spawn /usr
+act spawn-script /path/to/your/script
 ```
 
 ---
