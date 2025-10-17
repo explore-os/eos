@@ -80,6 +80,26 @@ The easiest way to run your own actors is by spawning the script-actor with your
 act spawn-script /path/to/your/script
 ```
 
+The rune script must contain the following function:
+```rs
+pub fn handle(state, msg) {
+    // your code goes here
+    return state;
+}
+```
+
+The script actor reads the state from the its state file every time a message arrives and passes it as
+first argument to your handle function. The message gets passed as a second argument.
+
+If you want to persist data between messages, add it to the state and return it. The script actor will
+take the value that gets returned from the handle function, serializes is to json and writes it back
+to the state file.
+
+If you want to send a message, you can use the send function that is provided by the script actor.
+The send function takes the id of the actor the message should be sent to as first argument and
+a map as the second argument. The contents of the map will be serialized to json and the supervisor
+will make sure the message finds its way to its target.
+
 ---
 
 ## How it works
