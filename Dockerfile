@@ -21,4 +21,4 @@ WORKDIR /app
 COPY --from=builder /app/target/release/supervisor /usr/local/bin
 COPY --from=builder /app/target/release/eos /usr/local/bin
 COPY --from=builder /app/target/release/script-actor /usr/local/bin
-ENTRYPOINT ["/usr/local/bin/supervisor"]
+CMD ["/usr/local/bin/supervisor"]
