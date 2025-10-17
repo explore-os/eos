@@ -16,14 +16,14 @@ struct Cli {
 #[derive(Subcommand, PartialEq)]
 enum Action {
     Script {
-        script: PathBuf,
+        script: String,
         // #[arg(short, long)]
         // copy: Option<Vec<PathBuf>>,
         // #[arg(short, long)]
         // args: Option<Vec<String>>,
     },
     Spawn {
-        path: PathBuf,
+        path: String,
         // #[arg(short, long)]
         // copy: Option<Vec<PathBuf>>,
         // #[arg(short, long)]
