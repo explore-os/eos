@@ -78,8 +78,8 @@ fn main() -> anyhow::Result<()> {
         Action::Spawn { path } => {
             let props = Props {
                 path: std::fs::canonicalize(PathBuf::from(shellexpand::full(&path)?.to_string()))?,
-                args: args.unwrap_or_default(),
-                copy: copy.unwrap_or_default(),
+                args: Vec::new(),
+                copy: Vec::new(),
             };
             std::fs::write(
                 root.join(SPAWN_DIR).join(nanoid!()),
