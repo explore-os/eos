@@ -23,7 +23,8 @@ COPY --from=builder /app/target/release/eos /usr/local/bin
 COPY --from=builder /app/target/release/script-actor /usr/local/bin
 
 RUN mkdir /eos
+COPY --from=builder /app/examples /eos
 COPY --from=builder /app/README.md /eos/README.md
 RUN chown -R vscode:vscode /eos
 
-ENTRYPOINT ["nohup", "/usr/local/bin/supervisor"]
+ENTRYPOINT ["/usr/local/bin/supervisor"]

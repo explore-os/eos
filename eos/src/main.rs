@@ -3,12 +3,10 @@ use std::path::{Path, PathBuf};
 use anyhow::bail;
 use clap::{Parser, Subcommand};
 use nanoid::nanoid;
-use supervisor::{ACTOR_DIR, PAUSE_FILE, Props, SEND_DIR, SPAWN_DIR};
+use supervisor::{ACTOR_DIR, PAUSE_FILE, Props, SEND_DIR, SPAWN_DIR, eos_root};
 
 #[derive(Parser)]
 struct Cli {
-    #[arg(default_value = "/eos")]
-    root: PathBuf,
     #[command(subcommand)]
     command: Action,
 }
@@ -46,19 +44,20 @@ fn cleanup(pid: usize) -> anyhow::Result<()> {
     )?)
 }
 
-fn get_root_pid(root: impl AsRef<Path>) -> anyhow::Result<usize> {
-    let pid_string = std::fs::read_to_string(root.as_ref().join(".pid"))?;
+fn get_root_pid() -> anyhow::Result<usize> {
+    let pid_string = std::fs::read_to_string(eos_root().as_ref().join(".pid"))?;
     Ok(pid_string.parse::<usize>()?)
 }
 
 fn main() -> anyhow::Result<()> {
-    let Cli { root, command } = Cli::parse();
+    let Cli { command } = Cli::parse();
+    let root = eos_root();
     let pid_file = root.join(".pid");
     if !pid_file.exists() {
         eprintln!("Actor system is not running!");
     }
     match command {
-        Action::Refresh => cleanup(get_root_pid(root)?)?,
+        Action::Refresh => cleanup(get_root_pid()?)?,
         Action::Script { script } => {
             let mut script_copy = vec![std::fs::canonicalize(PathBuf::from(
                 shellexpand::full(&script)?.to_string(),
@@ -73,7 +72,7 @@ fn main() -> anyhow::Result<()> {
                 root.join(SPAWN_DIR).join(nanoid!()),
                 serde_json::to_string_pretty(&props)?,
             )?;
-            notify(get_root_pid(root)?)?;
+            notify(get_root_pid()?)?;
         }
         Action::Spawn { path } => {
             let props = Props {
@@ -85,13 +84,13 @@ fn main() -> anyhow::Result<()> {
                 root.join(SPAWN_DIR).join(nanoid!()),
                 serde_json::to_string_pretty(&props)?,
             )?;
-            notify(get_root_pid(root)?)?;
+            notify(get_root_pid()?)?;
         }
         Action::List => {
             if !root.join(".pid").exists() {
                 bail!("The actor system isn't running!");
             }
-            cleanup(get_root_pid(&root)?)?;
+            cleanup(get_root_pid()?)?;
             let mut entries = std::fs::read_dir(root.join(ACTOR_DIR))?;
             while let Some(Ok(dir)) = entries.next() {
                 let actor_dir = dir.path();
@@ -119,7 +118,7 @@ fn main() -> anyhow::Result<()> {
             let actor_pid_string = std::fs::read_to_string(path.join(".pid"))?;
             let actor_pid = actor_pid_string.parse::<usize>()?;
             kill(actor_pid)?;
-            cleanup(get_root_pid(root)?)?;
+            cleanup(get_root_pid()?)?;
         }
         Action::Pause { path } => {
             if !path.join(".pid").exists() {

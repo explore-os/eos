@@ -9,6 +9,10 @@ pub const SPAWN_DIR: &str = "spawn";
 pub const SEND_DIR: &str = "send";
 pub const PAUSE_FILE: &str = "paused";
 
+pub fn eos_root() -> Path {
+    Path::new("/eos")
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Props {
     pub path: std::path::PathBuf,

@@ -7,14 +7,14 @@ use clap::Parser;
 use env_logger::Env;
 use faccess::PathExt;
 use nanoid::nanoid;
-use supervisor::{ACTOR_DIR, MAILBOX_DIR, MAILBOX_HEAD, PAUSE_FILE, Props, SEND_DIR, SPAWN_DIR};
+use supervisor::{
+    ACTOR_DIR, MAILBOX_DIR, MAILBOX_HEAD, PAUSE_FILE, Props, SEND_DIR, SPAWN_DIR, eos_root,
+};
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::{process::Command, spawn};
 
 #[derive(Debug, Parser)]
 struct Args {
-    #[arg(default_value = "/eos")]
-    root: PathBuf,
     #[arg(short, long, default_value = "2")]
     /// Time in seconds after which the system checks for messages
     tick: u8,
@@ -230,8 +230,9 @@ async fn check_queue(
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
-    let Args { root, tick } = Args::parse();
+    let Args { tick } = Args::parse();
 
+    let root = eos_root();
     if root.join(".pid").exists() {
         eprintln!(
             "The pid file for the supervisor already exists, terminating. If the supervisor is not running, feel free to delete the file and try again. ({})",
