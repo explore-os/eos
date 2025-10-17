@@ -26,5 +26,6 @@ RUN mkdir /eos
 COPY --from=builder /app/examples /eos/examples
 COPY --from=builder /app/README.md /eos/README.md
 RUN chown -R vscode:vscode /eos
+RUN /usr/local/bin/eos completions /home/vscode/.config/fish/completions
 
 ENTRYPOINT ["/usr/local/bin/supervisor"]
