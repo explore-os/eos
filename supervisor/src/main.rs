@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::Duration;
 
 use anyhow::bail;
@@ -231,34 +231,33 @@ async fn tick() -> anyhow::Result<u64> {
 async fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
 
-    let root = Path::new(ROOT);
-    if root.join(".pid").exists() {
+    let root_dir = Path::new(ROOT);
+    if root_dir.join(".pid").exists() {
         eprintln!(
             "The pid file for the supervisor already exists, terminating. If the supervisor is not running, feel free to delete the file and try again. ({})",
-            root.join(".pid").display()
+            root_dir.join(".pid").display()
         );
         return Ok(());
     }
 
     let pid = std::process::id();
     log::info!("Running as PID: {pid}",);
-    fs::write(root.join(".pid"), format!("{pid}")).await?;
+    fs::write(root_dir.join(".pid"), format!("{pid}")).await?;
 
     log::info!("supervisor started");
 
     let mut spawn_signal = signal(SignalKind::user_defined1())?;
 
-    let props_dir = root.join(SPAWN_DIR);
+    let props_dir = root_dir.join(SPAWN_DIR);
     std::fs::create_dir_all(&props_dir)?;
 
-    let actor_dir = root.join(ACTOR_DIR);
+    let actor_dir = root_dir.join(ACTOR_DIR);
     std::fs::create_dir_all(&actor_dir)?;
 
-    let send_dir = root.join(SEND_DIR);
+    let send_dir = root_dir.join(SEND_DIR);
     std::fs::create_dir_all(&send_dir)?;
 
     {
-        let root_dir = root.clone();
         let send_dir = send_dir.clone();
         let props_dir = props_dir.clone();
         let actor_dir = actor_dir.clone();
@@ -280,7 +279,6 @@ async fn main() -> anyhow::Result<()> {
 
     let mut cleanup_signal = signal(SignalKind::user_defined2())?;
     {
-        let root_dir = root.clone();
         let actor_dir = actor_dir.clone();
         spawn(async move {
             loop {
@@ -299,7 +297,6 @@ async fn main() -> anyhow::Result<()> {
     }
 
     {
-        let root_dir = root.clone();
         let actor_dir = actor_dir.clone();
         spawn(async move {
             tokio::signal::ctrl_c()
@@ -314,7 +311,6 @@ async fn main() -> anyhow::Result<()> {
     }
 
     {
-        let root_dir = root.clone();
         let actor_dir = actor_dir.clone();
         spawn(async move {
             loop {
@@ -335,7 +331,7 @@ async fn main() -> anyhow::Result<()> {
     loop {
         let tick = tick().await?;
         tokio::time::sleep(Duration::from_secs(tick)).await;
-        if fs::try_exists(root.join(PAUSE_FILE)).await? {
+        if fs::try_exists(root_dir.join(PAUSE_FILE)).await? {
             continue;
         }
         if let Err(e) = check_actors(&actor_dir, tick).await {

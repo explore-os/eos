@@ -1366,6 +1366,7 @@ dependencies = [
  "anyhow",
  "clap",
  "env_logger",
+ "eos",
  "faccess",
  "flume",
  "indexmap",

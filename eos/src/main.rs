@@ -61,14 +61,12 @@ fn main() -> anyhow::Result<()> {
     match command {
         Action::Refresh => cleanup(get_root_pid()?)?,
         Action::Script { script } => {
-            let mut script_copy = vec![std::fs::canonicalize(PathBuf::from(
-                shellexpand::full(&script)?.to_string(),
-            ))?];
-            // script_copy.extend(copy.unwrap_or_default().into_iter());
             let props = Props {
                 path: PathBuf::from("/usr/local/bin/script-actor"),
-                args: Vec::new(),
-                copy: script_copy,
+                copy: vec![std::fs::canonicalize(PathBuf::from(
+                    shellexpand::full(&script)?.to_string(),
+                ))?],
+                ..Default::default()
             };
             std::fs::write(
                 root.join(SPAWN_DIR).join(nanoid!()),
@@ -79,8 +77,7 @@ fn main() -> anyhow::Result<()> {
         Action::Spawn { path } => {
             let props = Props {
                 path: std::fs::canonicalize(PathBuf::from(shellexpand::full(&path)?.to_string()))?,
-                args: Vec::new(),
-                copy: Vec::new(),
+                ..Default::default()
             };
             std::fs::write(
                 root.join(SPAWN_DIR).join(nanoid!()),
@@ -135,7 +132,7 @@ fn main() -> anyhow::Result<()> {
             std::fs::remove_file(path.join(PAUSE_FILE))?;
         }
         Action::SetTick { seconds } => std::fs::write(root.join(".tick"), seconds.to_string())?,
-        Action::ResetTick => std::fs::remove_file(root.join(".tick")),
+        Action::ResetTick => std::fs::remove_file(root.join(".tick"))?,
     }
     Ok(())
 }

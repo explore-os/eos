@@ -12,9 +12,9 @@ pub const SPAWN_DIR: &str = "spawn";
 pub const SEND_DIR: &str = "send";
 pub const PAUSE_FILE: &str = "paused";
 
-#[derive(Debug, Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Props {
-    pub path: std::path::PathBuf,
+    pub path: PathBuf,
     #[serde(default)]
     pub args: Vec<String>,
     #[serde(default)]
