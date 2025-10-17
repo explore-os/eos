@@ -101,7 +101,7 @@ async fn move_next_message(message_dir: impl AsRef<Path>, tick: u64) -> anyhow::
     });
     let now = std::time::SystemTime::now();
     for (msg_path, t) in messages {
-        if now.duration_since(t)?.as_millis() < tick {
+        if now.duration_since(t)?.as_millis() < tick as u128 {
             continue;
         }
         fs::rename(
@@ -203,7 +203,7 @@ async fn check_queue(
     let actor_dir = actor_dir.as_ref();
     let now = std::time::SystemTime::now();
     for (msg_path, t) in messages {
-        if now.duration_since(t)?.as_millis() < tick {
+        if now.duration_since(t)?.as_millis() < tick as u128 {
             continue;
         }
         if let Some((target, id)) = msg_path
