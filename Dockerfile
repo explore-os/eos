@@ -9,11 +9,9 @@ FROM chef AS builder
 COPY --from=planner /app/recipe.json recipe.json
 RUN cargo chef cook --release --recipe-path recipe.json
 COPY . .
-RUN cargo build --release -p supervisor
-RUN cargo build --release -p eos
-RUN cargo build --release -p script-actor
+RUN cargo build --release --all
 
-FROM mcr.microsoft.com/vscode/devcontainers/universal AS runtime
+FROM mcr.microsoft.com/vscode/devcontainers/base:ubuntu AS runtime
 
 RUN apt-get update && \
         apt-get install -y --no-install-recommends git ca-certificates curl fish bash sudo && \
