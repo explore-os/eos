@@ -82,7 +82,7 @@ fn main() -> anyhow::Result<()> {
         Action::Refresh => cleanup(get_root_pid(root)?)?,
         Action::Script { script } => {
             let mut script_copy = vec![std::fs::canonicalize(PathBuf::from(shellexpand::full(
-                script,
+                &script,
             )?))?];
             // script_copy.extend(copy.unwrap_or_default().into_iter());
             let props = Props {
@@ -98,7 +98,7 @@ fn main() -> anyhow::Result<()> {
         }
         Action::Spawn { path } => {
             let props = Props {
-                path: std::fs::canonicalize(PathBuf::from(shellexpand::full(path)?))?,
+                path: std::fs::canonicalize(PathBuf::from(shellexpand::full(&path)?))?,
                 args: args.unwrap_or_default(),
                 copy: copy.unwrap_or_default(),
             };
