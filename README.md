@@ -72,12 +72,26 @@ code eos-play
 When asked if you want to open the project inside a container, click yes so vscode can set up the docker
 container for you.
 
-Once vscode has started and built everything, you should have a running `supervisor` and
-a running `script-actor` that writes the last message it received into its state.
+Once vscode has started and built everything, you should have a running `supervisor`.
 
-The easiest way to run your own actors is by spawning the script-actor with your custom [rune](https://rune-rs.github.io/) script.
+To start the provided test actor you can open a terminal in vscode and run the following command:
 ```sh
-act script /path/to/your/script
+eos script /eos/workspace/examples/test-actor.rn
+```
+
+And to send it a message to see if its working you can use the following:
+```sh
+eos send /eos/actors/<TheIdTheActorGot> '{"hello":"world"}'
+```
+
+You should see the message slowly traveling towards its destination and vanish, once the actor is done with it.
+When that happens, you can use `cat` to output the contents of the `state.json` file in the actors directory,
+which should contain the message tha was sent to it earlier.
+
+To run your own code and start experimenting, you can write your own actor script in [rune](https://rune-rs.github.io/)
+and spawn it through `eos`:
+```sh
+eos script /path/to/your/script
 ```
 
 The rune script must contain the following function:
@@ -117,7 +131,7 @@ From now on, I'm going to to be using `$EOS_ROOT` when referring to that directo
 
 There are three main directories:
 - `$EOS_ROOT/spawn`
-- `$EOS_ROOT/running`
+- `$EOS_ROOT/actors`
 - `$EOS_ROOT/send`
 
 The `spawn` directory is for creating new actors. You just need to create a json file there containing the `path` to
@@ -130,7 +144,7 @@ When an actor is spawned, it gets passed its own ID, the path to its state file,
 the path to the file it should read when a new message is available,
 the directory it should write file into when sending a message and after that, all args specified in the json file.
 
-After the actor has been spawned, you will see a new directory inside the `running` directory,
+After the actor has been spawned, you will see a new directory inside the `actors` directory,
 which contains all the data regarding this actor. It has a `state.json` containing its current state,
 a `.pid` for coordination and a `spool` directory for working through messages.
 
@@ -152,7 +166,7 @@ it will take the oldest message and rename it to that. After thats done, it will
 the actor, so it knows its allowed to read the message. After the actor is done, it will delete the file,
 making space for the next one.
 
-If the `supervisor` receives a `KILL` signal, it will look through the `running` directory
+If the `supervisor` receives a `KILL` signal, it will look through the `actors` directory
 and send `KILL` signals to every actor. Each actor has 30 seconds to cleanly terminate, after that its
 directory will be removed.
 
