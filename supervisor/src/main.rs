@@ -10,6 +10,8 @@ use nanoid::nanoid;
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::{fs, process::Command, spawn};
 
+const DEFAULT_TICK: u64 = 2;
+
 async fn spawn_actor(
     root: impl AsRef<Path>,
     send_dir: impl AsRef<Path>,
@@ -78,7 +80,7 @@ async fn check_props(
     Ok(())
 }
 
-async fn move_next_message(message_dir: impl AsRef<Path>, tick_speed: u64) -> anyhow::Result<bool> {
+async fn move_next_message(message_dir: impl AsRef<Path>, tick: u64) -> anyhow::Result<bool> {
     let mut update = false;
     let mut entries = fs::read_dir(&message_dir).await?;
     let mut messages = Vec::new();
@@ -99,7 +101,7 @@ async fn move_next_message(message_dir: impl AsRef<Path>, tick_speed: u64) -> an
     });
     let now = std::time::SystemTime::now();
     for (msg_path, t) in messages {
-        if now.duration_since(t)?.as_secs() < tick_speed {
+        if now.duration_since(t)?.as_millis() < tick {
             continue;
         }
         fs::rename(
@@ -116,7 +118,7 @@ async fn move_next_message(message_dir: impl AsRef<Path>, tick_speed: u64) -> an
     Ok(update)
 }
 
-async fn check_actors(actor_dir: impl AsRef<Path>, tick_speed: u64) -> anyhow::Result<()> {
+async fn check_actors(actor_dir: impl AsRef<Path>, tick: u64) -> anyhow::Result<()> {
     let mut entries = fs::read_dir(&actor_dir).await?;
     while let Some(entry) = entries.next_entry().await? {
         if entry.path().is_file() {
@@ -130,8 +132,8 @@ async fn check_actors(actor_dir: impl AsRef<Path>, tick_speed: u64) -> anyhow::R
         if fs::try_exists(message_dir.join(MAILBOX_HEAD)).await? {
             continue;
         }
-        if move_next_message(&message_dir, tick_speed).await? {
-            tokio::time::sleep(Duration::from_secs(tick_speed)).await;
+        if move_next_message(&message_dir, tick).await? {
+            tokio::time::sleep(Duration::from_millis(tick)).await;
             let pid = fs::read_to_string(actor_dir.join(".pid"))
                 .await?
                 .parse::<usize>()?;
@@ -188,7 +190,7 @@ async fn check_alive(actor_dir: impl AsRef<Path>) -> anyhow::Result<()> {
 async fn check_queue(
     actor_dir: impl AsRef<Path>,
     send_dir: impl AsRef<Path>,
-    tick_speed: u64,
+    tick: u64,
 ) -> anyhow::Result<()> {
     let mut entries = fs::read_dir(&send_dir).await?;
     let mut messages = Vec::new();
@@ -201,7 +203,7 @@ async fn check_queue(
     let actor_dir = actor_dir.as_ref();
     let now = std::time::SystemTime::now();
     for (msg_path, t) in messages {
-        if now.duration_since(t)?.as_secs() < tick_speed {
+        if now.duration_since(t)?.as_millis() < tick {
             continue;
         }
         if let Some((target, id)) = msg_path
@@ -222,8 +224,8 @@ async fn tick() -> anyhow::Result<u64> {
     if fs::try_exists(&tick_path).await? {
         Ok(fs::read_to_string(tick_path).await?.trim().parse()?)
     } else {
-        fs::write(tick_path, "2").await?;
-        Ok(2)
+        fs::write(tick_path, DEFAULT_TICK.to_string()).await?;
+        Ok(DEFAULT_TICK)
     }
 }
 
@@ -330,7 +332,7 @@ async fn main() -> anyhow::Result<()> {
 
     loop {
         let tick = tick().await?;
-        tokio::time::sleep(Duration::from_secs(tick)).await;
+        tokio::time::sleep(Duration::from_millis(tick)).await;
         if fs::try_exists(root_dir.join(PAUSE_FILE)).await? {
             continue;
         }

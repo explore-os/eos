@@ -13,15 +13,31 @@ struct Cli {
 
 #[derive(Subcommand, PartialEq)]
 enum Action {
-    Script { script: String },
-    Spawn { path: String },
+    Script {
+        script: String,
+    },
+    Spawn {
+        path: String,
+    },
     List,
     Refresh,
-    Pause { path: PathBuf },
-    Unpause { path: PathBuf },
-    Send { path: PathBuf, msg: String },
-    Kill { path: PathBuf },
-    SetTick { seconds: u64 },
+    Pause {
+        path: PathBuf,
+    },
+    Unpause {
+        path: PathBuf,
+    },
+    Send {
+        path: PathBuf,
+        msg: String,
+    },
+    Kill {
+        path: PathBuf,
+    },
+    SetTick {
+        #[arg(value_parser = clap::value_parser!(u64).range(500..))]
+        milliseconds: u64,
+    },
     ResetTick,
 }
 
@@ -131,7 +147,9 @@ fn main() -> anyhow::Result<()> {
             }
             std::fs::remove_file(path.join(PAUSE_FILE))?;
         }
-        Action::SetTick { seconds } => std::fs::write(root.join(".tick"), seconds.to_string())?,
+        Action::SetTick { milliseconds } => {
+            std::fs::write(root.join(".tick"), milliseconds.to_string())?
+        }
         Action::ResetTick => std::fs::remove_file(root.join(".tick"))?,
     }
     Ok(())
