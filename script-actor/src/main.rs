@@ -39,7 +39,7 @@ async fn main() -> anyhow::Result<()> {
             let state: rune::Value = serde_json::from_str(&state_string)?;
             state
         } else {
-            Object::new()
+            rune::Value::new(Object::new())?
         };
 
         let mut context = Context::with_default_modules()?;
@@ -66,9 +66,7 @@ async fn main() -> anyhow::Result<()> {
         let mut vm = Vm::new(runtime, Arc::new(unit));
 
         let output = vm.call(["handle"], (state, message))?;
-        if output != rune::Value::empty() {
-            tokio::fs::write(&state_file, serde_json::to_string_pretty(&output)?).await?;
-        }
+        tokio::fs::write(&state_file, serde_json::to_string_pretty(&output)?).await?;
 
         tokio::fs::remove_file(&message_file).await?;
     }
