@@ -11,7 +11,7 @@ RUN cargo chef cook --release --recipe-path recipe.json
 COPY . .
 RUN cargo build --release --all
 
-FROM mcr.microsoft.com/vscode/devcontainers/base:ubuntu AS runtime
+FROM mcr.microsoft.com/vscode/devcontainers/base:debian AS runtime
 
 RUN apt-get update && \
         apt-get install -y --no-install-recommends git ca-certificates curl fish bash sudo && \
