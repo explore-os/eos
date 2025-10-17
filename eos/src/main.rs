@@ -7,6 +7,7 @@ use eos::{ACTOR_DIR, PAUSE_FILE, Props, ROOT, SEND_DIR, SPAWN_DIR};
 use nanoid::nanoid;
 
 #[derive(Parser)]
+#[command(name = "eos", version, about)]
 struct Cli {
     #[command(subcommand)]
     command: Action,
