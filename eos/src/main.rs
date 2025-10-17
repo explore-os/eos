@@ -2,10 +2,17 @@ use std::path::{Path, PathBuf};
 
 use anyhow::bail;
 use clap::{Command, Parser, Subcommand};
-use clap_complete::{aot::Fish, generate_to};
 use eos::{ACTOR_DIR, PAUSE_FILE, Props, ROOT, SEND_DIR, SPAWN_DIR};
 use nanoid::nanoid;
 
+#[cfg(feature = "_setup")]
+use clap_complete::{aot::Fish, generate_to};
+
+#[cfg(feature = "_setup")]
+#[derive(Parser)]
+struct SetupCli {
+    out_dir: PathBuf,
+}
 #[derive(Parser)]
 struct Cli {
     #[command(subcommand)]
@@ -62,8 +69,6 @@ enum Action {
         #[command(subcommand)]
         command: TickCommand,
     },
-    #[command(hide = true)]
-    Completions { out_dir: PathBuf },
 }
 
 #[derive(Subcommand)]
@@ -105,6 +110,14 @@ fn get_root_pid() -> anyhow::Result<usize> {
 }
 
 fn main() -> anyhow::Result<()> {
+    #[cfg(feature = "_setup")]
+    {
+        let SetupCli { out_dir } = SetupCli::parse();
+        let mut cmd = Cli::command();
+        generate_to(Fish, &mut cmd, "eos", &out_dir)?;
+        std::process::exit(0);
+    }
+
     let Cli { command } = Cli::parse();
     let root = Path::new(ROOT);
     let pid_file = root.join(".pid");
@@ -190,10 +203,6 @@ fn main() -> anyhow::Result<()> {
             }
             TickCommand::Reset => std::fs::remove_file(root.join(".tick"))?,
         },
-        Action::Completions { out_dir } => {
-            let mut cmd = Cli::command();
-            generate_to(Fish, &mut cmd, "eos", &out_dir)?;
-        }
     }
     Ok(())
 }
