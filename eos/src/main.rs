@@ -3,7 +3,7 @@ use std::path::{Path, PathBuf};
 use anyhow::bail;
 use clap::{Parser, Subcommand};
 use nanoid::nanoid;
-use supervisor::{ACTOR_DIR, PAUSE_FILE, Props, SEND_DIR, SPAWN_DIR, eos_root};
+use supervisor::{ACTOR_DIR, PAUSE_FILE, Props, ROOT, SEND_DIR, SPAWN_DIR};
 
 #[derive(Parser)]
 struct Cli {
@@ -45,13 +45,13 @@ fn cleanup(pid: usize) -> anyhow::Result<()> {
 }
 
 fn get_root_pid() -> anyhow::Result<usize> {
-    let pid_string = std::fs::read_to_string(eos_root().as_ref().join(".pid"))?;
+    let pid_string = std::fs::read_to_string(Path::new(ROOT).join(".pid"))?;
     Ok(pid_string.parse::<usize>()?)
 }
 
 fn main() -> anyhow::Result<()> {
     let Cli { command } = Cli::parse();
-    let root = eos_root();
+    let root = Path::new(ROOT);
     let pid_file = root.join(".pid");
     if !pid_file.exists() {
         eprintln!("Actor system is not running!");

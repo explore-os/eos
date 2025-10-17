@@ -8,7 +8,7 @@ use env_logger::Env;
 use faccess::PathExt;
 use nanoid::nanoid;
 use supervisor::{
-    ACTOR_DIR, MAILBOX_DIR, MAILBOX_HEAD, PAUSE_FILE, Props, SEND_DIR, SPAWN_DIR, eos_root,
+    ACTOR_DIR, MAILBOX_DIR, MAILBOX_HEAD, PAUSE_FILE, Props, ROOT, SEND_DIR, SPAWN_DIR,
 };
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::{process::Command, spawn};
@@ -232,7 +232,7 @@ async fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
     let Args { tick } = Args::parse();
 
-    let root = eos_root();
+    let root = Path::new(ROOT);
     if root.join(".pid").exists() {
         eprintln!(
             "The pid file for the supervisor already exists, terminating. If the supervisor is not running, feel free to delete the file and try again. ({})",
