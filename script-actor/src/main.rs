@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use clap::Parser;
 use nanoid::nanoid;
+use rune::runtime::Object;
 use rune::termcolor::{ColorChoice, StandardStream};
 use rune::{Context, ContextError, Diagnostics, Module, Source, Sources, Vm};
 use serde::{Deserialize, Serialize};
@@ -30,15 +31,16 @@ async fn main() -> anyhow::Result<()> {
     let mut message_signal = signal(SignalKind::user_defined1())?;
     loop {
         message_signal.recv().await;
+        let message_string = tokio::fs::read_to_string(&message_file).await?;
+        let message: rune::Value = serde_json::from_str(&message_string)?;
+
         let state = if state_file.exists() {
             let state_string = tokio::fs::read_to_string(&state_file).await?;
             let state: rune::Value = serde_json::from_str(&state_string)?;
             state
         } else {
-            rune::Value::empty()
+            Object::new()
         };
-        let message_string = tokio::fs::read_to_string(&message_file).await?;
-        let message: rune::Value = serde_json::from_str(&message_string)?;
 
         let mut context = Context::with_default_modules()?;
         let m = module(&send_dir, &id)?;
@@ -64,7 +66,9 @@ async fn main() -> anyhow::Result<()> {
         let mut vm = Vm::new(runtime, Arc::new(unit));
 
         let output = vm.call(["handle"], (state, message))?;
-        tokio::fs::write(&state_file, serde_json::to_string_pretty(&output)?).await?;
+        if output != rune::Value::empty() {
+            tokio::fs::write(&state_file, serde_json::to_string_pretty(&output)?).await?;
+        }
 
         tokio::fs::remove_file(&message_file).await?;
     }
