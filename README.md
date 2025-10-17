@@ -77,7 +77,7 @@ a running `script-actor` that writes the last message it received into its state
 
 The easiest way to run your own actors is by spawning the script-actor with your custom [rune](https://rune-rs.github.io/) script.
 ```sh
-act spawn-script /path/to/your/script
+act script /path/to/your/script
 ```
 
 The rune script must contain the following function:

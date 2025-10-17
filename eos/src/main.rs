@@ -15,7 +15,7 @@ struct Cli {
 
 #[derive(Subcommand, PartialEq)]
 enum Action {
-    SpawnScript {
+    Script {
         script: PathBuf,
         #[arg(short, long)]
         copy: Option<Vec<PathBuf>>,
@@ -91,7 +91,7 @@ fn main() -> anyhow::Result<()> {
     match command {
         Action::Start => {}
         Action::Cleanup => cleanup(get_root_pid(root)?)?,
-        Action::SpawnScript { script, args, copy } => {
+        Action::Script { script, args, copy } => {
             let mut script_copy = vec![script];
             script_copy.extend(copy.unwrap_or_default().into_iter());
             let props = Props {
