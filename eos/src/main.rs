@@ -19,6 +19,7 @@ struct Cli {
     command: Action,
 }
 
+#[cfg(feature = "_setup")]
 impl Cli {
     fn command() -> Command {
         <Self as clap::CommandFactory>::command()
@@ -75,8 +76,8 @@ enum Action {
 enum TickCommand {
     /// sets the tick rate of the system
     Set {
-        /// the tick rate of the system in milliseconds
-        #[arg(value_parser = clap::value_parser!(u64).range(500..))]
+        /// the tick rate of the system in milliseconds (must be 100 or higher)
+        #[arg(value_parser = clap::value_parser!(u64).range(100..))]
         milliseconds: u64,
     },
     /// resets the tick rate of the system
