@@ -1,5 +1,6 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
+use anyhow::bail;
 use clap::{Parser, Subcommand};
 use nanoid::nanoid;
 use supervisor::{ACTOR_DIR, PAUSE_FILE, Props, SEND_DIR, SPAWN_DIR};
@@ -12,7 +13,7 @@ struct Cli {
     command: Action,
 }
 
-#[derive(Subcommand)]
+#[derive(Subcommand, PartialEq)]
 enum Action {
     SpawnScript {
         script: PathBuf,
@@ -30,20 +31,29 @@ enum Action {
     },
     List,
     Cleanup,
-    Pause {
+    #[command(alias = "p")]
+    Pause,
+    #[command(alias = "u")]
+    Unpause,
+    #[command(alias = "pa")]
+    PauseActor {
         path: PathBuf,
     },
-    Unpause {
+    #[command(alias = "ua")]
+    UnpauseActor {
         path: PathBuf,
     },
+    #[command(aliases = ["-", "s"])]
     Send {
         path: PathBuf,
         msg: String,
     },
+    #[command(alias = "k")]
     Kill {
         path: PathBuf,
     },
     Shutdown,
+    Start,
 }
 
 fn kill(pid: usize) -> anyhow::Result<()> {
@@ -67,13 +77,20 @@ fn cleanup(pid: usize) -> anyhow::Result<()> {
     )?)
 }
 
+fn get_root_pid(root: impl AsRef<Path>) -> anyhow::Result<usize> {
+    let pid_string = std::fs::read_to_string(root)?;
+    Ok(pid_string.parse::<usize>()?)
+}
+
 fn main() -> anyhow::Result<()> {
     let Cli { root, command } = Cli::parse();
     let pid_file = root.join(".pid");
-    let pid_string = std::fs::read_to_string(pid_file)?;
-    let pid = pid_string.parse::<usize>()?;
+    if !pid_file.exists() && Action::Start != command {
+        eprintln!("Actor system is not running!");
+    }
     match command {
-        Action::Cleanup => cleanup(pid)?,
+        Action::Start => {}
+        Action::Cleanup => cleanup(get_root_pid(root)?)?,
         Action::SpawnScript { script, args, copy } => {
             let mut script_copy = vec![script];
             script_copy.extend(copy.unwrap_or_default().into_iter());
@@ -86,7 +103,7 @@ fn main() -> anyhow::Result<()> {
                 root.join(SPAWN_DIR).join(nanoid!()),
                 serde_json::to_string_pretty(&props)?,
             )?;
-            notify(pid)?;
+            notify(get_root_pid(root)?)?;
         }
         Action::Spawn { path, args, copy } => {
             let props = Props {
@@ -98,19 +115,23 @@ fn main() -> anyhow::Result<()> {
                 root.join(SPAWN_DIR).join(nanoid!()),
                 serde_json::to_string_pretty(&props)?,
             )?;
-            notify(pid)?;
+            notify(get_root_pid(root)?)?;
         }
         Action::List => {
-            cleanup(pid)?;
+            cleanup(get_root_pid(&root)?)?;
             let mut entries = std::fs::read_dir(root.join(ACTOR_DIR))?;
             while let Some(Ok(dir)) = entries.next() {
-                if dir.path().is_file() {
+                let actor_dir = dir.path();
+                if actor_dir.is_file() || !actor_dir.join(".pid").exists() {
                     continue;
                 }
                 println!("{}", dir.file_name().display());
             }
         }
         Action::Send { path, msg } => {
+            if !path.join(".pid").exists() {
+                bail!("There is no actor running in the specified directory!");
+            }
             let id = path.file_name().expect("Invalid path!").display();
             std::fs::write(
                 root.join(SEND_DIR)
@@ -119,19 +140,34 @@ fn main() -> anyhow::Result<()> {
             )?;
         }
         Action::Kill { path } => {
+            if !path.join(".pid").exists() {
+                bail!("There is no actor running in the specified directory!");
+            }
             let actor_pid_string = std::fs::read_to_string(path.join(".pid"))?;
             let actor_pid = actor_pid_string.parse::<usize>()?;
             kill(actor_pid)?;
-            cleanup(pid)?;
+            cleanup(get_root_pid(root)?)?;
         }
         Action::Shutdown => {
-            kill(pid)?;
+            kill(get_root_pid(root)?)?;
         }
-        Action::Pause { path } => {
+        Action::PauseActor { path } => {
+            if !path.join(".pid").exists() {
+                bail!("There is no actor running in the specified directory!");
+            }
             std::fs::File::create(path.join(PAUSE_FILE))?;
         }
-        Action::Unpause { path } => {
+        Action::UnpauseActor { path } => {
+            if !path.join(".pid").exists() {
+                bail!("There is no actor running in the specified directory!");
+            }
             std::fs::remove_file(path.join(PAUSE_FILE))?;
+        }
+        Action::Pause => {
+            std::fs::File::create(root.join(PAUSE_FILE))?;
+        }
+        Action::Unpause => {
+            std::fs::remove_file(root.join(PAUSE_FILE))?;
         }
     }
     Ok(())
