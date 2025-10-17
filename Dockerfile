@@ -13,7 +13,7 @@ RUN cargo build --release -p supervisor
 RUN cargo build --release -p eos
 RUN cargo build --release -p script-actor
 
-FROM debian:bookworm-slim AS runtime
+FROM mcr.microsoft.com/vscode/devcontainers/universal AS runtime
 
 RUN apt-get update && \
         apt-get install -y --no-install-recommends git ca-certificates curl fish bash sudo && \
@@ -23,4 +23,4 @@ WORKDIR /app
 COPY --from=builder /app/target/release/supervisor /usr/local/bin
 COPY --from=builder /app/target/release/eos /usr/local/bin
 COPY --from=builder /app/target/release/script-actor /usr/local/bin
-ENTRYPOINT ["/usr/local/bin/supervisor"]
+CMD ["/usr/local/bin/supervisor"]
