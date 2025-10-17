@@ -1,4 +1,3 @@
 [workspace]
 resolver = "3"
-members = ["act", "supervisor", "script-actor"]
-default-members = ["supervisor"]
+members = ["eos", "supervisor", "script-actor"]

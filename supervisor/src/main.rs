@@ -13,7 +13,7 @@ use tokio::{process::Command, spawn};
 
 #[derive(Debug, Parser)]
 struct Args {
-    #[arg(default_value = "/var/actors")]
+    #[arg(default_value = "/eos")]
     root: PathBuf,
     #[arg(short, long, default_value = "2")]
     /// Time in seconds after which the system checks for messages
@@ -232,11 +232,19 @@ async fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
     let Args { root, tick } = Args::parse();
 
+    if root.join(".pid").exists() {
+        eprintln!(
+            "The pid file for the supervisor already exists, terminating. If the supervisor is not running, feel free to delete the file and try again. ({})",
+            root.join(".pid").display()
+        );
+        return Ok(());
+    }
+
     let pid = std::process::id();
     log::info!("Running as PID: {pid}",);
     tokio::fs::write(root.join(".pid"), format!("{pid}")).await?;
 
-    log::info!("actos-supervisor started");
+    log::info!("supervisor started");
 
     let mut spawn_signal = signal(SignalKind::user_defined1())?;
 

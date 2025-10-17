@@ -1,11 +1,12 @@
-# ActOS
+# EOS (explore os)
 
-This project is an experimental **actor system built on the Linux filesystem and signals**.  
+This project is an experimental **actor system built on the Linux filesystem and signals**.
 It acts like a **sandbox for exploring system behavior** - you can model services, send messages, and eventually pause,
-inspect, and edit interactions at runtime. Think of it as a **lightweight debugger for distributed systems**.  
+inspect, and edit interactions at runtime. Think of it as a **lightweight debugger for distributed systems**.
 
 - [Introduction](#introduction)
 - [Why?](#why)
+- [Getting started](#getting-started)
 - [How it works](#how-it-works)
 - [Whats next](#whats-next)
 
@@ -13,22 +14,21 @@ inspect, and edit interactions at runtime. Think of it as a **lightweight debugg
 
 ## Introduction
 This project is an experiment in building an **actor system on top of the Linux filesystem and signals**.
-While it’s inspired by the actor model, you don’t need prior actor experience to understand the idea:  
+While it’s inspired by the actor model, you don’t need prior actor experience to understand the idea:
 
-- You can think of each **actor** as a service.  
-- Sending a **message** is like calling a function or making a request to a server.  
-- Whether you picture it as microservices, a monolith, or distributed servers, the same model applies.  
+- You can think of each **actor** as a service.
+- Sending a **message** is like calling a function or making a request to a server.
+- Whether you picture it as microservices, a monolith, or distributed servers, the same model applies.
 
-The goal is to create a **lightweight playground** where you can:  
+The goal is to create a **lightweight playground** where you can:
 
-- **Prototype microservice interactions**: watch requests and responses flow between simplified services.  
-- **Experiment with execution order**: test “what happens if A runs before B” in a game or system.  
-- **Inspect and modify at runtime** (planned): pause the system, edit messages, and resume execution.  
+- **Prototype microservice interactions**: watch requests and responses flow between simplified services.
+- **Experiment with execution order**: test “what happens if A runs before B” in a game or system.
+- **Inspect and modify at runtime** (planned): pause the system, edit messages, and resume execution.
 
-Think of it as turning a container into a **navigable debugger for your whole system**.  
+Think of it as turning a container into a **navigable debugger for your whole system**.
 It’s not production-ready and it’s slower than real-world setups—but that’s the point: it’s a safe,
-transparent environment to explore how complex systems behave.  
-
+transparent environment to explore how complex systems behave.
 
 ## Why?
 I was thinking about how to design a VM, for an actor based language, thats image based like smalltalk,
@@ -44,35 +44,55 @@ file system to store its internal state instead.
 
 You're probably already thinking of around a hundred reasons why this is a bad idea and I just want to say
 that I agree. Using this in a production system would bring all sorts of problems with it.
-It's inefficent, unsecure and probably many other things I can't think of right now.
+It's inefficient, unsecure and probably many other things I can't think of right now.
 
 So why build it? Well, as a learning tool. I thought it would be really cool if there was a system that isn't just
 programmable, but also fully inspectable as well. And by building it on top of linux, it's possible to
 use all the pre-existing tools to monitor and inspect the system while it's running.
 
+## Getting started
+The easiest way to get started is by cloning the [eos-playground](https://github.com/hardliner66/eos-play)
+and opening it in vscode. The playground uses a devcontainer to set everything up properly and put you
+directly into a working environment.
+```sh
+git clone https://github.com/hardliner66/eos-play
+code eos-play
+```
+
+When asked if you want to open the project inside a container, click yes so vscode can set up the docker
+container for you.
+
+Once vscode has started and built everything, you should have a running `supervisor` and
+a running `script-actor` that writes the last message it received into its state.
+
+The easiest way to run your own actors is by spawning the script-actor with your custom [rune](https://rune-rs.github.io/) script.
+```sh
+act spawn /usr
+```
+
 ## How it works
-Currently there are two parts that make it run. The `supervisor` and `act`.
+Currently there are two parts that make it run. The `supervisor` and `eos`.
 
 The `supervisor` is responsible for setting up the necessary directory structures, spawning actors/processes,
 moving messages around and cleaning up when an actor dies.
 
-`act` is the cli tool that is intended to simplify interacting with the `supervisor`.
+`eos` is the cli tool that is intended to simplify interacting with the `supervisor`.
 It's technically not needed, but it should make it easier to get started.
 
 When the `supervisor` starts, it creates the base directory structure in the specified root directory (actor system root, not linux root).
 By default it puts everything into `/var/actors`, but you can change that by passing it as an argument on startup.
-From now on, I'm going to to be using `$ACTOS_ROOT` when referring to that directory
+From now on, I'm going to to be using `$EOS_ROOT` when referring to that directory
 
 There are three main directories:
-- `$ACTOS_ROOT/spawn`
-- `$ACTOS_ROOT/running`
-- `$ACTOS_ROOT/send`
+- `$EOS_ROOT/spawn`
+- `$EOS_ROOT/running`
+- `$EOS_ROOT/send`
 
 The `spawn` directory is for creating new actors. You just need to create a json file there containing the `path` to
 the binary you want to run and the arguments (`args`) you want it to run with. After the file is created,
 you need to notify the `supervisor` that a new actor is waiting to get created, which is done by sending it
-the signal `USR1`. When spawning an actor through the `act` tool, this is done automatically, but if you want
-to do it yourself, you can run `kill -USR1 $(cat $ACTOS_ROOT/.pid)`. Make sure to replace `$ACTOS_ROOT` with the actual directory.
+the signal `USR1`. When spawning an actor through the `eos` tool, this is done automatically, but if you want
+to do it yourself, you can run `kill -USR1 $(cat $EOS_ROOT/.pid)`. Make sure to replace `$EOS_ROOT` with the actual directory.
 
 When an actor is spawned, it gets passed its own ID, the path to its state file,
 the path to the file it should read when a new message is available,
@@ -100,11 +120,11 @@ it will take the oldest message and rename it to that. After thats done, it will
 the actor, so it knows its allowed to read the message. After the actor is done, it will delete the file,
 making space for the next one.
 
-If the `supervisor` recieves a `KILL` signal, it will look through the `running` directory
+If the `supervisor` receives a `KILL` signal, it will look through the `running` directory
 and send `KILL` signals to every actor. Each actor has 30 seconds to cleanly terminate, after that its
 directory will be removed.
 
-Most common actions should be available through `act`, but if you want more control,
+Most common actions should be available through `eos`, but if you want more control,
 you can also build your own or write some scripts to interact with the system.
 
 ## Whats next

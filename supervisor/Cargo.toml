@@ -3,10 +3,6 @@ name = "supervisor"
 version = "0.1.0"
 edition = "2024"
 
-[[bin]]
-name = "actos-supervisor"
-path = "src/main.rs"
-
 [dependencies]
 anyhow = { version = "1.0.79", features = ["backtrace"] }
 clap = { version = "4.5.1", features = ["derive"] }

@@ -6,7 +6,7 @@ use supervisor::{ACTOR_DIR, PAUSE_FILE, Props, SEND_DIR, SPAWN_DIR};
 
 #[derive(Parser)]
 struct Cli {
-    #[arg(default_value = "/var/actors")]
+    #[arg(default_value = "/eos")]
     root: PathBuf,
     #[command(subcommand)]
     command: Action,
@@ -14,6 +14,13 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Action {
+    SpawnScript {
+        script: PathBuf,
+        #[arg(short, long)]
+        copy: Option<Vec<PathBuf>>,
+        #[arg(short, long)]
+        args: Option<Vec<String>>,
+    },
     Spawn {
         path: PathBuf,
         #[arg(short, long)]
@@ -42,7 +49,7 @@ enum Action {
 fn kill(pid: usize) -> anyhow::Result<()> {
     Ok(nix::sys::signal::kill(
         nix::unistd::Pid::from_raw(pid as i32),
-        nix::sys::signal::Signal::SIGKILL,
+        nix::sys::signal::Signal::SIGINT,
     )?)
 }
 
@@ -67,6 +74,20 @@ fn main() -> anyhow::Result<()> {
     let pid = pid_string.parse::<usize>()?;
     match command {
         Action::Cleanup => cleanup(pid)?,
+        Action::SpawnScript { script, args, copy } => {
+            let mut script_copy = vec![script];
+            script_copy.extend(copy.unwrap_or_default().into_iter());
+            let props = Props {
+                path: PathBuf::from("/usr/local/bin/script-actor"),
+                args: args.unwrap_or_default(),
+                copy: script_copy,
+            };
+            std::fs::write(
+                root.join(SPAWN_DIR).join(nanoid!()),
+                serde_json::to_string_pretty(&props)?,
+            )?;
+            notify(pid)?;
+        }
         Action::Spawn { path, args, copy } => {
             let props = Props {
                 path,
