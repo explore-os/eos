@@ -1,4 +1,4 @@
-# EOS (explore os)
+# EOS (Explore OS)
 
 This project is an experimental **actor system built on the Linux filesystem and signals**.
 It acts like a **sandbox for exploring system behavior** - you can model services, send messages, and eventually pause,
@@ -30,6 +30,8 @@ Think of it as turning a container into a **navigable debugger for your whole sy
 It’s not production-ready and it’s slower than real-world setups—but that’s the point: it’s a safe,
 transparent environment to explore how complex systems behave.
 
+---
+
 ## Why?
 I was thinking about how to design a VM, for an actor based language, thats image based like smalltalk,
 while still making it possible to use vscode (or any other editor for that matter) for editing the source code.
@@ -50,6 +52,8 @@ So why build it? Well, as a learning tool. I thought it would be really cool if 
 programmable, but also fully inspectable as well. And by building it on top of linux, it's possible to
 use all the pre-existing tools to monitor and inspect the system while it's running.
 
+---
+
 ## Getting started
 The easiest way to get started is by cloning the [eos-playground](https://github.com/hardliner66/eos-play)
 and opening it in vscode. The playground uses a devcontainer to set everything up properly and put you
@@ -69,6 +73,8 @@ The easiest way to run your own actors is by spawning the script-actor with your
 ```sh
 act spawn /usr
 ```
+
+---
 
 ## How it works
 Currently there are two parts that make it run. The `supervisor` and `eos`.
@@ -126,6 +132,8 @@ directory will be removed.
 
 Most common actions should be available through `eos`, but if you want more control,
 you can also build your own or write some scripts to interact with the system.
+
+---
 
 ## Whats next
 The whole thing is still quite rough around the edges. There are no supervision trees, which is
