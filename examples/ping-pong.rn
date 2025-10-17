@@ -1,0 +1,7 @@
+pub fn handle(state, msg) {
+    let sender = msg["sender"];
+    let response = msg["payload"];
+    response["ping"] = !response["ping"];
+    send(sender, response);
+    return state;
+}
