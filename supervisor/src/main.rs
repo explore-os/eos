@@ -213,7 +213,7 @@ async fn check_queue(
             .split_once("::")
         {
             let target_dir = actor_dir.join(target).join(MAILBOX_DIR);
-            if fs::try_exists(&target_dir).await {
+            if fs::try_exists(&target_dir).await? {
                 fs::rename(&msg_path, &target_dir.join(id)).await?;
             } else {
                 fs::remove_file(msg_path).await?;
