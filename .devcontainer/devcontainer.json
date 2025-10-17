@@ -9,7 +9,11 @@
     "vscode": {
       "settings": {
         "terminal.integrated.defaultProfile.linux": "fish"
-      }
+      },
+      "extensions": [
+        "udoprog.rune-vscode",
+        "yzhang.markdown-all-in-one"
+      ]
     }
   },
   "remoteUser": "vscode",

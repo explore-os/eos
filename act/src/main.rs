@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 use nanoid::nanoid;
-use supervisor::{ACTOR_DIR, Props, SEND_DIR, SPAWN_DIR};
+use supervisor::{ACTOR_DIR, PAUSE_FILE, Props, SEND_DIR, SPAWN_DIR};
 
 #[derive(Parser)]
 struct Cli {
@@ -14,11 +14,28 @@ struct Cli {
 
 #[derive(Subcommand)]
 enum Action {
-    Spawn { path: PathBuf, args: Vec<String> },
+    Spawn {
+        path: PathBuf,
+        #[arg(short, long)]
+        copy: Option<Vec<PathBuf>>,
+        #[arg(short, long)]
+        args: Option<Vec<String>>,
+    },
     List,
     Cleanup,
-    Send { path: PathBuf, msg: String },
-    Kill { path: PathBuf },
+    Pause {
+        path: PathBuf,
+    },
+    Unpause {
+        path: PathBuf,
+    },
+    Send {
+        path: PathBuf,
+        msg: String,
+    },
+    Kill {
+        path: PathBuf,
+    },
     Shutdown,
 }
 
@@ -50,8 +67,12 @@ fn main() -> anyhow::Result<()> {
     let pid = pid_string.parse::<usize>()?;
     match command {
         Action::Cleanup => cleanup(pid)?,
-        Action::Spawn { path, args } => {
-            let props = Props { path, args };
+        Action::Spawn { path, args, copy } => {
+            let props = Props {
+                path,
+                args: args.unwrap_or_default(),
+                copy: copy.unwrap_or_default(),
+            };
             std::fs::write(
                 root.join(SPAWN_DIR).join(nanoid!()),
                 serde_json::to_string_pretty(&props)?,
@@ -84,6 +105,12 @@ fn main() -> anyhow::Result<()> {
         }
         Action::Shutdown => {
             kill(pid)?;
+        }
+        Action::Pause { path } => {
+            std::fs::File::create(path.join(PAUSE_FILE))?;
+        }
+        Action::Unpause { path } => {
+            std::fs::remove_file(path.join(PAUSE_FILE))?;
         }
     }
     Ok(())

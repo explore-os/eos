@@ -1,14 +1,36 @@
 # ActOS
 
-An actor system built on top of linux primitives.
+This project is an experimental **actor system built on the Linux filesystem and signals**.  
+It acts like a **sandbox for exploring system behavior** - you can model services, send messages, and eventually pause,
+inspect, and edit interactions at runtime. Think of it as a **lightweight debugger for distributed systems**.  
 
+- [Introduction](#introduction)
 - [Why?](#why)
 - [How it works](#how-it-works)
 - [Whats next](#whats-next)
 
+---
+
+## Introduction
+This project is an experiment in building an **actor system on top of the Linux filesystem and signals**.
+While it’s inspired by the actor model, you don’t need prior actor experience to understand the idea:  
+
+- You can think of each **actor** as a service.  
+- Sending a **message** is like calling a function or making a request to a server.  
+- Whether you picture it as microservices, a monolith, or distributed servers, the same model applies.  
+
+The goal is to create a **lightweight playground** where you can:  
+
+- **Prototype microservice interactions**: watch requests and responses flow between simplified services.  
+- **Experiment with execution order**: test “what happens if A runs before B” in a game or system.  
+- **Inspect and modify at runtime** (planned): pause the system, edit messages, and resume execution.  
+
+Think of it as turning a container into a **navigable debugger for your whole system**.  
+It’s not production-ready and it’s slower than real-world setups—but that’s the point: it’s a safe,
+transparent environment to explore how complex systems behave.  
+
 
 ## Why?
-
 I was thinking about how to design a VM, for an actor based language, thats image based like smalltalk,
 while still making it possible to use vscode (or any other editor for that matter) for editing the source code.
 My first idea was to create a user mode file system with fuse that could map the code to files

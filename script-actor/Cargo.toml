@@ -1,5 +1,5 @@
 [package]
-name = "test-actor"
+name = "script-actor"
 version = "0.1.0"
 edition = "2024"
 
@@ -19,3 +19,6 @@ tokio-stream = { version = "0.1.14", features = ["io-util"] }
 uuid = { version = "1.7.0", features = ["v4", "serde"] }
 syslog = "7.0.0"
 log = "0.4.28"
+rune = "0.14.1"
+rune-modules = { version = "0.14.1", features = ["serde_json"] }
+nanoid = "0.4.0"

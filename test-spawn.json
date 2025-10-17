@@ -1,7 +1,0 @@
-{
-    "path": "/workspace/actos/target/debug/test-actor",
-    "args": [
-        "hello",
-        "world"
-    ]
-}

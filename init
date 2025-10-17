@@ -1,0 +1,5 @@
+#!/bin/bash
+
+cargo install --path supervisor
+cargo install --path act
+cargo install --path script-actor

@@ -7,7 +7,7 @@ use clap::Parser;
 use env_logger::Env;
 use faccess::PathExt;
 use nanoid::nanoid;
-use supervisor::{ACTOR_DIR, MAILBOX_DIR, MAILBOX_HEAD, Props, SEND_DIR, SPAWN_DIR};
+use supervisor::{ACTOR_DIR, MAILBOX_DIR, MAILBOX_HEAD, PAUSE_FILE, Props, SEND_DIR, SPAWN_DIR};
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::{process::Command, spawn};
 
@@ -23,28 +23,38 @@ struct Args {
 async fn spawn_actor(
     root: impl AsRef<Path>,
     send_dir: impl AsRef<Path>,
-    spawn_actor: Props,
+    props: Props,
 ) -> anyhow::Result<String> {
-    if !spawn_actor.path.is_file() {
-        bail!("{} is not a file", spawn_actor.path.display());
+    if !props.path.is_file() {
+        bail!("{} is not a file", props.path.display());
     }
 
-    if !spawn_actor.path.executable() {
-        bail!("{} is not an executable file", spawn_actor.path.display());
+    if !props.path.executable() {
+        bail!("{} is not an executable file", props.path.display());
     }
     let id = nanoid!();
     let actor_dir = root.as_ref().join(&id);
     tokio::fs::create_dir_all(&actor_dir).await?;
+    for f in &props.copy {
+        tokio::fs::copy(f, actor_dir.join(f.file_name().unwrap())).await?;
+    }
     let message_dir = actor_dir.join(MAILBOX_DIR);
     tokio::fs::create_dir_all(&message_dir).await?;
     let message_file = message_dir.join(MAILBOX_HEAD);
     let state_file = actor_dir.join("state.json");
-    let process = Command::new(&spawn_actor.path)
+    let process = Command::new(&props.path)
         .arg(&id)
         .arg(state_file)
         .arg(message_file)
         .arg(send_dir.as_ref())
-        .args(spawn_actor.args)
+        .args(
+            props
+                .copy
+                .iter()
+                .map(|p| p.display().to_string())
+                .collect::<Vec<_>>(),
+        )
+        .args(props.args)
         .spawn()?;
 
     tokio::fs::write(
@@ -123,6 +133,9 @@ async fn check_actors(actor_dir: impl AsRef<Path>, tick_speed: u64) -> anyhow::R
             continue;
         }
         let actor_dir = entry.path();
+        if tokio::fs::try_exists(actor_dir.join(PAUSE_FILE)).await? {
+            continue;
+        }
         let message_dir = actor_dir.join(MAILBOX_DIR);
         if tokio::fs::try_exists(message_dir.join(MAILBOX_HEAD)).await? {
             continue;
@@ -237,12 +250,19 @@ async fn main() -> anyhow::Result<()> {
     std::fs::create_dir_all(&send_dir)?;
 
     {
+        let root_dir = root.clone();
         let send_dir = send_dir.clone();
         let props_dir = props_dir.clone();
         let actor_dir = actor_dir.clone();
         spawn(async move {
             loop {
                 spawn_signal.recv().await;
+                if tokio::fs::try_exists(root_dir.join(PAUSE_FILE))
+                    .await
+                    .expect("WHY YOU NO READ FILE?")
+                {
+                    continue;
+                }
                 if let Err(e) = check_props(&props_dir, &actor_dir, &send_dir).await {
                     log::error!("{e}");
                 }
@@ -252,11 +272,20 @@ async fn main() -> anyhow::Result<()> {
 
     let mut cleanup_signal = signal(SignalKind::user_defined2())?;
     {
+        let root_dir = root.clone();
         let actor_dir = actor_dir.clone();
         spawn(async move {
-            cleanup_signal.recv().await;
-            if let Err(e) = check_alive(&actor_dir).await {
-                log::error!("{e}");
+            loop {
+                cleanup_signal.recv().await;
+                if tokio::fs::try_exists(root_dir.join(PAUSE_FILE))
+                    .await
+                    .expect("WHY YOU NO READ FILE?")
+                {
+                    continue;
+                }
+                if let Err(e) = check_alive(&actor_dir).await {
+                    log::error!("{e}");
+                }
             }
         });
     }
@@ -270,16 +299,23 @@ async fn main() -> anyhow::Result<()> {
                 .expect("Muahahaha, this should never happen!");
             log::info!("Actor system is shutting down");
             _ = tokio::fs::remove_file(root_dir.join(".pid")).await;
-            kill_actors(&actor_dir).await.unwrap();
+            _ = kill_actors(&actor_dir).await;
             std::process::exit(0);
         });
     }
 
     {
+        let root_dir = root.clone();
         let actor_dir = actor_dir.clone();
         spawn(async move {
-            tokio::time::sleep(Duration::from_secs(1)).await;
             loop {
+                tokio::time::sleep(Duration::from_secs(1)).await;
+                if tokio::fs::try_exists(root_dir.join(PAUSE_FILE))
+                    .await
+                    .expect("WHY YOU NO READ FILE?")
+                {
+                    continue;
+                }
                 if let Err(e) = check_alive(&actor_dir).await {
                     log::error!("{e}");
                 }
@@ -290,6 +326,9 @@ async fn main() -> anyhow::Result<()> {
     let tick = tick as u64;
     loop {
         tokio::time::sleep(Duration::from_secs(tick)).await;
+        if tokio::fs::try_exists(root.join(PAUSE_FILE)).await? {
+            continue;
+        }
         if let Err(e) = check_actors(&actor_dir, tick).await {
             log::error!("{e}");
         }
