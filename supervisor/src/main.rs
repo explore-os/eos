@@ -10,7 +10,7 @@ use nanoid::nanoid;
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::{fs, process::Command, spawn};
 
-const DEFAULT_TICK: u64 = 2;
+const DEFAULT_TICK: u64 = 2000;
 
 async fn spawn_actor(
     root: impl AsRef<Path>,
