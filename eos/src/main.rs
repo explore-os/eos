@@ -11,34 +11,59 @@ struct Cli {
     command: Action,
 }
 
-#[derive(Subcommand, PartialEq)]
+#[derive(Subcommand)]
 enum Action {
+    /// spawn a script actor
     Script {
+        /// the script that gets copied into the actor directory,
+        /// which the actor then reads and runs every time it receiving a message
         script: String,
     },
+    /// spawn a custom binary as actor
     Spawn {
+        /// the path to the binary that gets started as an EOS actor
         path: String,
     },
+    /// list all the running actors
     List,
-    Refresh,
+    /// notifies the supervisor to perform some checks and clean up dead actors
+    Update,
+    /// pauses an actor
     Pause {
+        /// the directory for the actor to pause
         path: PathBuf,
     },
+    /// unpauses an actor
     Unpause {
+        /// the directory for the actor to unpause
         path: PathBuf,
     },
+    /// puts message in the send queue and notifies the supervisor that a message is available
     Send {
+        /// the path to the actor the message should be sent
         path: PathBuf,
+        /// a string containing the json representation of a message
         msg: String,
     },
+    /// kills an actor
     Kill {
+        /// the path to the actor that should be killed
         path: PathBuf,
     },
-    SetTick {
+    ///
+    Tick {
+        #[command(subcommand)]
+        command: TickCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum TickCommand {
+    Set {
         #[arg(value_parser = clap::value_parser!(u64).range(500..))]
         milliseconds: u64,
     },
-    ResetTick,
+    Reset,
 }
 
 fn kill(pid: usize) -> anyhow::Result<()> {
@@ -55,7 +80,7 @@ fn notify(pid: usize) -> anyhow::Result<()> {
     )?)
 }
 
-fn cleanup(pid: usize) -> anyhow::Result<()> {
+fn update(pid: usize) -> anyhow::Result<()> {
     Ok(nix::sys::signal::kill(
         nix::unistd::Pid::from_raw(pid as i32),
         nix::sys::signal::Signal::SIGUSR2,
@@ -75,7 +100,7 @@ fn main() -> anyhow::Result<()> {
         eprintln!("Actor system is not running!");
     }
     match command {
-        Action::Refresh => cleanup(get_root_pid()?)?,
+        Action::Update => update(get_root_pid()?)?,
         Action::Script { script } => {
             let props = Props {
                 path: PathBuf::from("/usr/local/bin/script-actor"),
@@ -105,7 +130,7 @@ fn main() -> anyhow::Result<()> {
             if !root.join(".pid").exists() {
                 bail!("The actor system isn't running!");
             }
-            cleanup(get_root_pid()?)?;
+            update(get_root_pid()?)?;
             let mut entries = std::fs::read_dir(root.join(ACTOR_DIR))?;
             while let Some(Ok(dir)) = entries.next() {
                 let actor_dir = dir.path();
@@ -133,7 +158,7 @@ fn main() -> anyhow::Result<()> {
             let actor_pid_string = std::fs::read_to_string(path.join(".pid"))?;
             let actor_pid = actor_pid_string.parse::<usize>()?;
             kill(actor_pid)?;
-            cleanup(get_root_pid()?)?;
+            update(get_root_pid()?)?;
         }
         Action::Pause { path } => {
             if !path.join(".pid").exists() {
@@ -147,10 +172,12 @@ fn main() -> anyhow::Result<()> {
             }
             std::fs::remove_file(path.join(PAUSE_FILE))?;
         }
-        Action::SetTick { milliseconds } => {
-            std::fs::write(root.join(".tick"), milliseconds.to_string())?
-        }
-        Action::ResetTick => std::fs::remove_file(root.join(".tick"))?,
+        Action::Tick { command } => match command {
+            TickCommand::Set { milliseconds } => {
+                std::fs::write(root.join(".tick"), milliseconds.to_string())?
+            }
+            TickCommand::Reset => std::fs::remove_file(root.join(".tick"))?,
+        },
     }
     Ok(())
 }
