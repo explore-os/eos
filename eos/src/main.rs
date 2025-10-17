@@ -1,7 +1,8 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::bail;
-use clap::{Parser, Subcommand};
+use clap::{Command, Parser, Subcommand};
+use clap_complete::{aot::Fish, generate_to};
 use eos::{ACTOR_DIR, PAUSE_FILE, Props, ROOT, SEND_DIR, SPAWN_DIR};
 use nanoid::nanoid;
 
@@ -9,6 +10,12 @@ use nanoid::nanoid;
 struct Cli {
     #[command(subcommand)]
     command: Action,
+}
+
+impl Cli {
+    fn command() -> Command {
+        <Self as clap::CommandFactory>::command()
+    }
 }
 
 #[derive(Subcommand)]
@@ -50,19 +57,24 @@ enum Action {
         /// the path to the actor that should be killed
         path: PathBuf,
     },
-    ///
+    /// changes the tick rate of the system
     Tick {
         #[command(subcommand)]
         command: TickCommand,
     },
+    #[command(hide = true)]
+    Completions { out_dir: PathBuf },
 }
 
 #[derive(Subcommand)]
 enum TickCommand {
+    /// sets the tick rate of the system
     Set {
+        /// the tick rate of the system in milliseconds
         #[arg(value_parser = clap::value_parser!(u64).range(500..))]
         milliseconds: u64,
     },
+    /// resets the tick rate of the system
     Reset,
 }
 
@@ -178,6 +190,11 @@ fn main() -> anyhow::Result<()> {
             }
             TickCommand::Reset => std::fs::remove_file(root.join(".tick"))?,
         },
+        Action::Completions { out_dir } => {
+            let mut cmd = Cli::command();
+            let bin_name = cmd.get_bin_name().unwrap().to_owned();
+            generate_to(Fish, &mut cmd, bin_name, &out_dir)?;
+        }
     }
     Ok(())
 }
