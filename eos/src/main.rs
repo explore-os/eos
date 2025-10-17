@@ -7,7 +7,6 @@ use eos::{ACTOR_DIR, PAUSE_FILE, Props, ROOT, SEND_DIR, SPAWN_DIR};
 use nanoid::nanoid;
 
 #[derive(Parser)]
-#[command(name = "eos", version, about)]
 struct Cli {
     #[command(subcommand)]
     command: Action,
@@ -193,8 +192,7 @@ fn main() -> anyhow::Result<()> {
         },
         Action::Completions { out_dir } => {
             let mut cmd = Cli::command();
-            let bin_name = cmd.get_bin_name().unwrap().to_owned();
-            generate_to(Fish, &mut cmd, bin_name, &out_dir)?;
+            generate_to(Fish, &mut cmd, "eos", &out_dir)?;
         }
     }
     Ok(())
