@@ -54,7 +54,7 @@ fn get_root_pid(root: impl AsRef<Path>) -> anyhow::Result<usize> {
 fn main() -> anyhow::Result<()> {
     let Cli { root, command } = Cli::parse();
     let pid_file = root.join(".pid");
-    if !pid_file.exists() && Action::Start != command {
+    if !pid_file.exists() {
         eprintln!("Actor system is not running!");
     }
     match command {
