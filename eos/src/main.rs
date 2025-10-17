@@ -78,7 +78,7 @@ fn cleanup(pid: usize) -> anyhow::Result<()> {
 }
 
 fn get_root_pid(root: impl AsRef<Path>) -> anyhow::Result<usize> {
-    let pid_string = std::fs::read_to_string(root)?;
+    let pid_string = std::fs::read_to_string(root.as_ref().join(".pid"))?;
     Ok(pid_string.parse::<usize>()?)
 }
 
