@@ -76,7 +76,7 @@ Once vscode has started and built everything, you should have a running `supervi
 
 To start the provided test actor you can open a terminal in vscode and run the following command:
 ```sh
-eos script /eos/workspace/examples/test-actor.rn
+eos script /eos/examples/test-actor.rn
 ```
 
 And to send it a message to see if its working you can use the following:
