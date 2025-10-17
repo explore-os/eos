@@ -15,35 +15,14 @@ struct Cli {
 
 #[derive(Subcommand, PartialEq)]
 enum Action {
-    Script {
-        script: String,
-        // #[arg(short, long)]
-        // copy: Option<Vec<PathBuf>>,
-        // #[arg(short, long)]
-        // args: Option<Vec<String>>,
-    },
-    Spawn {
-        path: String,
-        // #[arg(short, long)]
-        // copy: Option<Vec<PathBuf>>,
-        // #[arg(short, long)]
-        // args: Option<Vec<String>>,
-    },
+    Script { script: String },
+    Spawn { path: String },
     List,
     Refresh,
-    Pause {
-        path: PathBuf,
-    },
-    Unpause {
-        path: PathBuf,
-    },
-    Send {
-        path: PathBuf,
-        msg: String,
-    },
-    Kill {
-        path: PathBuf,
-    },
+    Pause { path: PathBuf },
+    Unpause { path: PathBuf },
+    Send { path: PathBuf, msg: String },
+    Kill { path: PathBuf },
 }
 
 fn kill(pid: usize) -> anyhow::Result<()> {
@@ -141,9 +120,6 @@ fn main() -> anyhow::Result<()> {
             let actor_pid = actor_pid_string.parse::<usize>()?;
             kill(actor_pid)?;
             cleanup(get_root_pid(root)?)?;
-        }
-        Action::Shutdown => {
-            kill(get_root_pid(root)?)?;
         }
         Action::Pause { path } => {
             if !path.join(".pid").exists() {
