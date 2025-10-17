@@ -115,6 +115,11 @@ fn main() -> anyhow::Result<()> {
         let SetupCli { out_dir } = SetupCli::parse();
         let mut cmd = Cli::command();
         generate_to(Fish, &mut cmd, "eos", &out_dir)?;
+        let man = clap_mangen::Man::new(cmd);
+        let mut buffer: Vec<u8> = Default::default();
+        man.render(&mut buffer)?;
+
+        std::fs::write("/usr/share/man/eos.1", buffer)?;
         std::process::exit(0);
     }
 
