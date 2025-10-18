@@ -22,3 +22,4 @@ log = "0.4.28"
 rune = "0.14.1"
 rune-modules = { version = "0.14.1", features = ["serde_json"] }
 nanoid = "0.4.0"
+async-nats = "0.44.2"

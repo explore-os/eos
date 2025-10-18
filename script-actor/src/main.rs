@@ -6,7 +6,7 @@ use eos::Message;
 use nanoid::nanoid;
 use rune::runtime::Object;
 use rune::termcolor::{ColorChoice, StandardStream};
-use rune::{Context, ContextError, Diagnostics, Module, Source, Sources, Vm};
+use rune::{Context, Diagnostics, Module, Source, Sources, Vm};
 use serde::{Deserialize, Serialize};
 use tokio::signal::unix::{SignalKind, signal};
 
@@ -65,7 +65,22 @@ async fn main() -> anyhow::Result<()> {
         send_dir,
         script,
     } = Args::parse();
-    let m = module(&send_dir, &id)?;
+    let mut m = Module::new();
+    {
+        let id = id.clone();
+        m.function("send", move |to: &str, value: rune::Value| {
+            std::fs::write(
+                send_dir.join(format!("{to}::{}", nanoid!())),
+                serde_json::to_string_pretty(&Message {
+                    sender: Some(id.to_string()),
+                    payload: serde_json::to_value(value).unwrap(),
+                })
+                .unwrap(),
+            )
+        })
+        .build()?;
+    }
+    let m = m;
     tokio::fs::write(
         &state_file,
         serde_json::to_string_pretty(&init(&m, &script)?)?,
@@ -92,22 +107,4 @@ async fn main() -> anyhow::Result<()> {
 
         tokio::fs::remove_file(&message_file).await?;
     }
-}
-
-fn module(send_dir: impl AsRef<Path>, id: &str) -> Result<Module, ContextError> {
-    let mut m = Module::new();
-    let send_dir = send_dir.as_ref().to_path_buf();
-    let id = id.to_owned();
-    m.function("send", move |to: &str, value: rune::Value| {
-        std::fs::write(
-            send_dir.join(format!("{to}::{}", nanoid!())),
-            serde_json::to_string_pretty(&Message {
-                sender: Some(id.to_string()),
-                payload: serde_json::to_value(value).unwrap(),
-            })
-            .unwrap(),
-        )
-    })
-    .build()?;
-    Ok(m)
 }
