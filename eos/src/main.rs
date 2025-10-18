@@ -65,7 +65,7 @@ enum Action {
     Send {
         /// the id of the sender
         #[arg(short, long)]
-        sender: Option<String>,
+        sender: Option<PathBuf>,
         /// the path to the actor the message should be sent
         path: PathBuf,
         /// a string containing the json representation of a message
@@ -331,6 +331,20 @@ async fn main() -> anyhow::Result<()> {
                 bail!("There is no actor running in the specified directory!");
             }
             let id = path.file_name().expect("Invalid path!").display();
+            let sender = if let Some(sender) = sender {
+                if !sender.join(PID_FILE).exists() {
+                    bail!("The specified sender is not running");
+                }
+                Some(
+                    sender
+                        .file_name()
+                        .expect("Invalid path!")
+                        .display()
+                        .to_string(),
+                )
+            } else {
+                None
+            };
             std::fs::write(
                 root.join(SEND_DIR)
                     .join(format!("{id}::{}.json", nanoid!())),
