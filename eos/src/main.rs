@@ -83,6 +83,9 @@ enum Action {
     },
     /// handles "db" access
     Db {
+        /// path to the owning actor
+        path: PathBuf,
+        /// the db command
         #[command(subcommand)]
         command: DbCommand,
     },
@@ -98,8 +101,6 @@ enum SpawnCommand {
 enum DbCommand {
     /// store a value in an actors kv-store
     Store {
-        /// path to the owning actor
-        path: PathBuf,
         /// the key to store
         key: String,
         /// the value to store
@@ -107,22 +108,16 @@ enum DbCommand {
     },
     /// delete a value in an actors kv-store
     Delete {
-        /// path to the owning actor
-        path: PathBuf,
         /// the key to delete
         key: String,
     },
     /// load a value from an actors kv-store
     Load {
-        /// path to the owning actor
-        path: PathBuf,
         /// the key to load
         key: String,
     },
     /// checks if a value in an actors kv-store exists
     Exists {
-        /// path to the owning actor
-        path: PathBuf,
         /// the key to check
         key: String,
     },
@@ -383,8 +378,8 @@ async fn main() -> anyhow::Result<()> {
     }
     let nats = connect(nats).await.ok();
     match command {
-        Action::Db { command } => match command {
-            DbCommand::Store { path, key, value } => {
+        Action::Db { path, command } => match command {
+            DbCommand::Store { key, value } => {
                 db_action(
                     nats,
                     path.file_name().unwrap().display().to_string(),
@@ -395,7 +390,7 @@ async fn main() -> anyhow::Result<()> {
                 )
                 .await?;
             }
-            DbCommand::Delete { path, key } => {
+            DbCommand::Delete { key } => {
                 db_action(
                     nats,
                     path.file_name().unwrap().display().to_string(),
@@ -403,7 +398,7 @@ async fn main() -> anyhow::Result<()> {
                 )
                 .await?;
             }
-            DbCommand::Load { path, key } => {
+            DbCommand::Load { key } => {
                 db_action(
                     nats,
                     path.file_name().unwrap().display().to_string(),
@@ -411,7 +406,7 @@ async fn main() -> anyhow::Result<()> {
                 )
                 .await?;
             }
-            DbCommand::Exists { path, key } => {
+            DbCommand::Exists { key } => {
                 db_action(
                     nats,
                     path.file_name().unwrap().display().to_string(),

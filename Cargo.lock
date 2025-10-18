@@ -1758,6 +1758,7 @@ name = "script-actor"
 version = "0.1.0"
 dependencies = [
  "anyhow",
+ "async-nats",
  "clap",
  "eos",
  "faccess",
