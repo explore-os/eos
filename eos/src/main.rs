@@ -7,10 +7,12 @@ use bytes::Bytes;
 use clap::Command;
 use clap::{Parser, Subcommand};
 use eos::{
-    ACTOR_DIR, EOS_CTL, Message, PAUSE_FILE, Props, ROOT, Request, Response, SEND_DIR, SPAWN_DIR,
+    Dirs, EOS_CTL, Message, PAUSE_FILE, PID_FILE, Props, ROOT, Request, Response, SEND_DIR,
+    SPAWN_DIR, TICK_FILE,
 };
 use futures_util::StreamExt;
 use nanoid::nanoid;
+use tokio::fs;
 
 #[cfg(feature = "_setup")]
 use clap_complete::{aot::Fish, generate_to};
@@ -99,16 +101,24 @@ enum TickCommand {
     Reset,
 }
 
-fn kill(pid: usize) -> anyhow::Result<()> {
+async fn get_pid(path: impl AsRef<Path>) -> anyhow::Result<i32> {
+    let pid_file = path.as_ref().join(PID_FILE);
+    if !fs::try_exists(&pid_file).await? {
+        bail!("The actor system isn't running!");
+    }
+    Ok(fs::read_to_string(pid_file).await?.parse()?)
+}
+
+fn kill(pid: i32) -> anyhow::Result<()> {
     Ok(nix::sys::signal::kill(
-        nix::unistd::Pid::from_raw(pid as i32),
+        nix::unistd::Pid::from_raw(pid),
         nix::sys::signal::Signal::SIGINT,
     )?)
 }
 
-fn notify(pid: usize) -> anyhow::Result<()> {
+fn notify(pid: i32) -> anyhow::Result<()> {
     Ok(nix::sys::signal::kill(
-        nix::unistd::Pid::from_raw(pid as i32),
+        nix::unistd::Pid::from_raw(pid),
         nix::sys::signal::Signal::SIGUSR1,
     )?)
 }
@@ -143,9 +153,12 @@ async fn update_nats(client: &Client) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn update_unix(pid: usize) -> anyhow::Result<()> {
+async fn update_unix() -> anyhow::Result<()> {
+    let Dirs { root_dir, .. } = Dirs::get();
+    let pid_file = root_dir.join(PID_FILE);
+    let pid = fs::read_to_string(pid_file).await?;
     Ok(nix::sys::signal::kill(
-        nix::unistd::Pid::from_raw(pid as i32),
+        nix::unistd::Pid::from_raw(pid.parse()?),
         nix::sys::signal::Signal::SIGUSR2,
     )?)
 }
@@ -154,13 +167,8 @@ async fn update(nats: Option<Client>) -> anyhow::Result<()> {
     if let Some(nats) = nats {
         Ok(update_nats(&nats).await?)
     } else {
-        Ok(update_unix(get_root_pid()?).await?)
+        Ok(update_unix().await?)
     }
-}
-
-fn get_root_pid() -> anyhow::Result<usize> {
-    let pid_string = std::fs::read_to_string(Path::new(ROOT).join(".pid"))?;
-    Ok(pid_string.parse::<usize>()?)
 }
 
 async fn spawn_nats(client: &Client, props: Props) -> anyhow::Result<()> {
@@ -196,20 +204,84 @@ async fn spawn_nats(client: &Client, props: Props) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn spawn_unix(root: impl AsRef<Path>, props: Props) -> anyhow::Result<()> {
+async fn spawn_unix(props: Props) -> anyhow::Result<()> {
+    let Dirs { root_dir, .. } = Dirs::get();
     std::fs::write(
-        root.as_ref().join(SPAWN_DIR).join(nanoid!()),
+        root_dir.join(SPAWN_DIR).join(nanoid!()),
         serde_json::to_string_pretty(&props)?,
     )?;
-    notify(get_root_pid()?)?;
+    notify(get_pid(root_dir).await?)?;
     Ok(())
 }
 
-async fn spawn(nats: Option<Client>, root: impl AsRef<Path>, props: Props) -> anyhow::Result<()> {
+async fn spawn(nats: Option<Client>, props: Props) -> anyhow::Result<()> {
     if let Some(nats) = nats {
         Ok(spawn_nats(&nats, props).await?)
     } else {
-        Ok(spawn_unix(root, props)?)
+        Ok(spawn_unix(props).await?)
+    }
+}
+
+async fn list_nats(client: &Client) -> anyhow::Result<()> {
+    let session = nanoid!();
+
+    let mut sub = client.subscribe(format!("eos.response.{session}")).await?;
+
+    client
+        .publish(
+            EOS_CTL,
+            Bytes::from(serde_json::to_vec(&Request {
+                session_id: session.clone(),
+                cmd: eos::Command::List,
+            })?),
+        )
+        .await?;
+
+    while let Some(msg) = sub.next().await {
+        if let Ok(response) = serde_json::from_slice::<Response>(&msg.payload) {
+            match response {
+                Response::Actors { actors } => {
+                    for actor in actors {
+                        println!("- {actor}");
+                    }
+                }
+                Response::Failed { err } => {
+                    eprintln!("Failed to get actor list: {err}")
+                }
+                _ => (),
+            }
+            break;
+        }
+    }
+
+    Ok(())
+}
+async fn list_unix() -> anyhow::Result<()> {
+    let Dirs {
+        root_dir,
+        actor_dir,
+        ..
+    } = Dirs::get();
+    if !root_dir.join(PID_FILE).exists() {
+        bail!("The actor system isn't running!");
+    }
+    update_unix().await?;
+    let mut entries = std::fs::read_dir(actor_dir)?;
+    while let Some(Ok(dir)) = entries.next() {
+        let actor_dir = dir.path();
+        if actor_dir.is_file() || !actor_dir.join(PID_FILE).exists() {
+            continue;
+        }
+        println!("{}", dir.file_name().display());
+    }
+    Ok(())
+}
+
+async fn list(nats: Option<Client>) -> anyhow::Result<()> {
+    if let Some(nats) = nats {
+        Ok(list_nats(&nats).await?)
+    } else {
+        Ok(list_unix().await?)
     }
 }
 
@@ -225,7 +297,7 @@ async fn main() -> anyhow::Result<()> {
 
     let Cli { nats, command } = Cli::parse();
     let root = Path::new(ROOT);
-    let pid_file = root.join(".pid");
+    let pid_file = root.join(PID_FILE);
     if !pid_file.exists() {
         eprintln!("Actor system is not running!");
     }
@@ -249,24 +321,13 @@ async fn main() -> anyhow::Result<()> {
                 },
             };
 
-            spawn(nats, root, props).await?;
+            spawn(nats, props).await?;
         }
         Action::List => {
-            if !root.join(".pid").exists() {
-                bail!("The actor system isn't running!");
-            }
-            update(nats).await?;
-            let mut entries = std::fs::read_dir(root.join(ACTOR_DIR))?;
-            while let Some(Ok(dir)) = entries.next() {
-                let actor_dir = dir.path();
-                if actor_dir.is_file() || !actor_dir.join(".pid").exists() {
-                    continue;
-                }
-                println!("{}", dir.file_name().display());
-            }
+            list(nats).await?;
         }
         Action::Send { path, msg, sender } => {
-            if !path.join(".pid").exists() {
+            if !path.join(PID_FILE).exists() {
                 bail!("There is no actor running in the specified directory!");
             }
             let id = path.file_name().expect("Invalid path!").display();
@@ -280,31 +341,30 @@ async fn main() -> anyhow::Result<()> {
             )?;
         }
         Action::Kill { path } => {
-            if !path.join(".pid").exists() {
+            if !path.join(PID_FILE).exists() {
                 bail!("There is no actor running in the specified directory!");
             }
-            let actor_pid_string = std::fs::read_to_string(path.join(".pid"))?;
-            let actor_pid = actor_pid_string.parse::<usize>()?;
-            kill(actor_pid)?;
+            let actor_pid = std::fs::read_to_string(path.join(PID_FILE))?;
+            kill(actor_pid.parse()?)?;
             update(nats).await?;
         }
         Action::Pause { path } => {
-            if !path.join(".pid").exists() {
+            if !path.join(PID_FILE).exists() {
                 bail!("There is no actor running in the specified directory!");
             }
             std::fs::File::create(path.join(PAUSE_FILE))?;
         }
         Action::Unpause { path } => {
-            if !path.join(".pid").exists() {
+            if !path.join(PID_FILE).exists() {
                 bail!("There is no actor running in the specified directory!");
             }
             std::fs::remove_file(path.join(PAUSE_FILE))?;
         }
         Action::Tick { command } => match command {
             TickCommand::Set { milliseconds } => {
-                std::fs::write(root.join(".tick"), milliseconds.to_string())?
+                std::fs::write(root.join(TICK_FILE), milliseconds.to_string())?
             }
-            TickCommand::Reset => std::fs::remove_file(root.join(".tick"))?,
+            TickCommand::Reset => std::fs::remove_file(root.join(TICK_FILE))?,
         },
     }
     Ok(())

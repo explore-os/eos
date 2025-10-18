@@ -55,6 +55,7 @@ pub enum Response {
     Done,
     Failed { err: String },
     Spawned { id: String },
+    Actors { actors: Vec<String> },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -66,6 +67,7 @@ pub struct Request {
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Command {
     Spawn { props: Props },
+    List,
     Update,
 }
 

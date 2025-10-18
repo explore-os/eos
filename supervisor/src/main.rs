@@ -397,6 +397,32 @@ async fn main() -> anyhow::Result<()> {
                             eos::Command::Update => {
                                 cleanup().await;
                             }
+                            eos::Command::List => {
+                                let Dirs { actor_dir, .. } = Dirs::get();
+                                cleanup().await;
+                                let mut entries = std::fs::read_dir(actor_dir).unwrap();
+                                let mut actors = Vec::new();
+                                while let Some(Ok(dir)) = entries.next() {
+                                    let actor_dir = dir.path();
+                                    if actor_dir.is_file() || !actor_dir.join(PID_FILE).exists() {
+                                        continue;
+                                    }
+                                    actors
+                                        .push(actor_dir.file_name().unwrap().display().to_string());
+                                }
+                                if let Err(e) = client
+                                    .publish(
+                                        format!("eos.response.{session_id}"),
+                                        Bytes::from(
+                                            serde_json::to_vec(&Response::Actors { actors })
+                                                .unwrap(),
+                                        ),
+                                    )
+                                    .await
+                                {
+                                    log::error!("{e}");
+                                }
+                            }
                         },
                         Err(e) => log::error!("Invalid message format: {e}"),
                     }
