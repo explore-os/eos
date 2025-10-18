@@ -1,7 +1,11 @@
 pub fn handle(state, msg) {
     let sender = msg["sender"];
     let response = msg["payload"];
-    response["ping"] = !response["ping"];
+
+    response["state"] = match response["state"] {
+        "ping" => "pong",
+        _ => "ping",
+    };
     send(sender, response);
     return state;
 }
