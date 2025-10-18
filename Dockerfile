@@ -28,6 +28,10 @@ COPY --from=builder /app/target/release/setup /
 RUN mkdir /explore
 COPY --from=builder /app/examples /explore/examples
 COPY --from=builder /app/README.md /explore/README.md
+
+COPY --from=builder /app/docker-entrypoint.sh /
+RUN chmod +x /docker-entrypoint.sh
+
 RUN chown -R vscode:vscode /explore
 RUN mkdir -p /home/vscode/.config/fish/completions && \
         /setup /home/vscode/.config/fish/completions && \
@@ -36,4 +40,5 @@ RUN mkdir -p /home/vscode/.config/fish/completions && \
 
 RUN go install github.com/nats-io/natscli/nats@latest
 
-ENTRYPOINT ["/usr/local/bin/supervisor"]
+ENTRYPOINT ["docker-entrypoint.sh"]
+CMD ["/usr/local/bin/supervisor"]
