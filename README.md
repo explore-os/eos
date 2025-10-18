@@ -60,7 +60,7 @@ use all the pre-existing tools to monitor and inspect the system while it's runn
 ---
 
 ## Getting started
-The easiest way to get started is by cloning the [eos-playground](https://github.com/hardliner66/eos-play)
+The easiest way to get started is by cloning the [playground](https://github.com/explore-os/playground)
 and opening it in vscode. The playground uses a devcontainer to set everything up properly and put you
 directly into a working environment.
 
