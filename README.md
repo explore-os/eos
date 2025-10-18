@@ -81,12 +81,12 @@ Once vscode has started and built everything, you should have a running `supervi
 
 To start the provided test actor you can open a terminal in vscode and run the following command:
 ```sh
-eos spawn --id test script /eos/examples/test-actor.rn
+eos spawn --id test script /explore/examples/test-actor.rn
 ```
 
 And to send it a message to see if its working you can use the following:
 ```sh
-eos send /eos/actors/test '{"hello":"world"}'
+eos send /explore/actors/test '{"hello":"world"}'
 ```
 
 You should see the message slowly traveling towards its destination and vanish, once the actor is done with it.
@@ -103,6 +103,11 @@ The rune script must contain the following function:
 ```rs
 pub fn handle(state, msg) {
     // your code goes here
+
+    // if you want to persist something, you can add it to an actors state
+    state["detail"] = 10
+
+    // the data you return gets persisted into the actors state file
     return state;
 }
 ```
@@ -141,7 +146,7 @@ moving messages around and cleaning up when an actor dies.
 It's technically not needed, but it should make it easier to get started.
 
 When the `supervisor` starts, it creates the base directory structure in the specified root directory (actor system root, not linux root).
-By default it puts everything into `/var/actors`, but you can change that by passing it as an argument on startup.
+By default it puts everything into `/explore`, but you can change that by passing it as an argument on startup.
 From now on, I'm going to to be using `$EOS_ROOT` when referring to that directory
 
 There are three main directories:

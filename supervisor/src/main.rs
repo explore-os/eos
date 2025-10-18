@@ -1,5 +1,5 @@
 use std::cmp::Ordering;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use anyhow::bail;
@@ -7,21 +7,27 @@ use bytes::Bytes;
 use clap::Parser;
 use env_logger::Env;
 use eos::{
-    ACTOR_DIR, Dirs, MAILBOX_DIR, MAILBOX_HEAD, PAUSE_FILE, PID_FILE, Props, ROOT, Request,
-    Response, TICK_FILE,
+    ACTOR_DIR, DbAction, DbResponse, Dirs, MAILBOX_DIR, MAILBOX_HEAD, Message, PAUSE_FILE,
+    PID_FILE, Props, ROOT, Request, Response, TICK_FILE,
 };
 use faccess::PathExt;
 use futures_util::stream::StreamExt;
 use nanoid::nanoid;
+use redb::{Database, ReadableDatabase, TableDefinition};
+use serde::Serialize;
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::{fs, process::Command, spawn};
 
 const DEFAULT_TICK: u64 = 2000;
 
+const TABLE: TableDefinition<&str, String> = TableDefinition::new("DATA");
+
 #[derive(Parser)]
 struct Cli {
     #[arg(short, long, default_value = "nats://msgbus:4222")]
     nats: String,
+    #[arg(short, long)]
+    db: Option<PathBuf>,
     #[arg(short, long)]
     force: bool,
 }
@@ -39,6 +45,9 @@ async fn spawn_actor(
         bail!("{} is not an executable file", props.path.display());
     }
     let id = props.id.unwrap_or_else(|| nanoid!());
+    if id == "db" {
+        bail!("The id \"db\" is reserved");
+    }
     let actor_dir = root.as_ref().join(&id);
     if fs::try_exists(&actor_dir).await? {
         let pid_file = actor_dir.join(PID_FILE);
@@ -214,7 +223,7 @@ async fn check_queue(
     actor_dir: impl AsRef<Path>,
     send_dir: impl AsRef<Path>,
     tick: u64,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Vec<Message>> {
     let mut entries = fs::read_dir(&send_dir).await?;
     let mut messages = Vec::new();
     while let Some(entry) = entries.next_entry().await? {
@@ -225,6 +234,7 @@ async fn check_queue(
     }
     let actor_dir = actor_dir.as_ref();
     let now = std::time::SystemTime::now();
+    let mut db_messages = Vec::new();
     for (msg_path, t) in messages {
         if now.duration_since(t)?.as_millis() < tick as u128 {
             continue;
@@ -235,6 +245,13 @@ async fn check_queue(
             .to_string_lossy()
             .split_once("::")
         {
+            if target == "db" {
+                let msg_string = fs::read_to_string(&msg_path).await?;
+                let msg: Message = serde_json::from_str(&msg_string)?;
+                db_messages.push(msg);
+                fs::remove_file(msg_path).await?;
+                continue;
+            }
             let target_dir = actor_dir.join(target).join(MAILBOX_DIR);
             if fs::try_exists(&target_dir).await? {
                 fs::rename(&msg_path, &target_dir.join(id)).await?;
@@ -243,7 +260,7 @@ async fn check_queue(
             }
         }
     }
-    Ok(())
+    Ok(db_messages)
 }
 
 async fn tick() -> anyhow::Result<u64> {
@@ -273,10 +290,55 @@ async fn cleanup() {
     }
 }
 
+fn db_execute(db: Database, action: DbAction) -> anyhow::Result<Option<serde_json::Value>> {
+    let result = match action {
+        DbAction::Store { key, value } => {
+            let write_txn = db.begin_write()?;
+            {
+                let mut table = write_txn.open_table(TABLE)?;
+                table.insert(key.as_str(), serde_json::to_string(&value)?)?;
+            }
+            write_txn.commit()?;
+            None
+        }
+        DbAction::Delete { key } => {
+            let write_txn = db.begin_write()?;
+            {
+                let mut table = write_txn.open_table(TABLE)?;
+                table.remove(key.as_str())?;
+            }
+            write_txn.commit()?;
+            None
+        }
+        DbAction::Load { key } => {
+            let read_txn = db.begin_read()?;
+            let table = read_txn.open_table(TABLE)?;
+            if let Some(value) = table.get(key.as_str())? {
+                Some(serde_json::to_value(value.value())?)
+            } else {
+                None
+            }
+        }
+        DbAction::Exists { key } => {
+            let read_txn = db.begin_read()?;
+            let table = read_txn.open_table(TABLE)?;
+            let value = table.get(key.as_str())?.is_some();
+            Some(serde_json::to_value(value)?)
+        }
+    };
+    Ok(result)
+}
+
+async fn send<T: Serialize>(id: String, msg: T) -> anyhow::Result<()> {
+    let Dirs { send_dir, .. } = Dirs::get();
+    let msg_path = send_dir.join(format!("{id}::{}", nanoid!()));
+    Ok(fs::write(msg_path, serde_json::to_string_pretty(&msg)?).await?)
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
-    let Cli { force, nats } = Cli::parse();
+    let Cli { force, nats, db } = Cli::parse();
 
     let Dirs {
         root_dir,
@@ -450,8 +512,32 @@ async fn main() -> anyhow::Result<()> {
         if let Err(e) = check_actors(&actor_dir, tick).await {
             log::error!("{e}");
         }
-        if let Err(e) = check_queue(&actor_dir, &send_dir, tick).await {
-            log::error!("{e}");
+        match check_queue(&actor_dir, &send_dir, tick).await {
+            Ok(messages) => {
+                if let Some(base) = &db {
+                    for m in messages {
+                        let (id, db) = match m.sender {
+                            Some(sender) => (sender.clone(), Database::create(base.join(sender))?),
+                            _ => continue,
+                        };
+                        let action: DbAction = serde_json::from_value(m.payload)?;
+                        let response = match db_execute(db, action) {
+                            Ok(data) => DbResponse {
+                                success: true,
+                                data,
+                            },
+                            _ => DbResponse {
+                                success: false,
+                                data: None,
+                            },
+                        };
+                        send(id, response).await?;
+                    }
+                }
+            }
+            Err(e) => {
+                log::error!("{e}");
+            }
         }
     }
 }

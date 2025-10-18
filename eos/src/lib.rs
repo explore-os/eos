@@ -82,6 +82,29 @@ pub struct Props {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
+pub enum DbAction {
+    Store {
+        key: String,
+        value: serde_json::Value,
+    },
+    Delete {
+        key: String,
+    },
+    Load {
+        key: String,
+    },
+    Exists {
+        key: String,
+    },
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct DbResponse {
+    pub success: bool,
+    pub data: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
 pub struct Message {
     pub sender: Option<String>,
     pub payload: serde_json::Value,
