@@ -81,12 +81,12 @@ Once vscode has started and built everything, you should have a running `supervi
 
 To start the provided test actor you can open a terminal in vscode and run the following command:
 ```sh
-eos spawn script /eos/examples/test-actor.rn
+eos spawn --id test script /eos/examples/test-actor.rn
 ```
 
 And to send it a message to see if its working you can use the following:
 ```sh
-eos send /eos/actors/<TheIdTheActorGot> '{"hello":"world"}'
+eos send /eos/actors/test '{"hello":"world"}'
 ```
 
 You should see the message slowly traveling towards its destination and vanish, once the actor is done with it.
