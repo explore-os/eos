@@ -26,6 +26,7 @@ where
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Response {
+    Failed { err: String },
     Spawned { id: String },
 }
 
