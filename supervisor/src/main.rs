@@ -22,6 +22,8 @@ const DEFAULT_TICK: u64 = 2000;
 struct Cli {
     #[arg(short, long, default_value = "nats://msgbus:4222")]
     nats: String,
+    #[arg(short, long)]
+    force: bool,
 }
 
 async fn spawn_actor(
@@ -274,7 +276,7 @@ async fn cleanup() {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
-    let Cli { nats } = Cli::parse();
+    let Cli { force, nats } = Cli::parse();
 
     let Dirs {
         root_dir,
@@ -283,7 +285,7 @@ async fn main() -> anyhow::Result<()> {
         send_dir,
     } = Dirs::init()?;
 
-    if root_dir.join(PID_FILE).exists() {
+    if root_dir.join(PID_FILE).exists() && !force {
         eprintln!(
             "The pid file for the supervisor already exists, terminating. If the supervisor is not running, feel free to delete the file and try again. ({})",
             root_dir.join(PID_FILE).display()

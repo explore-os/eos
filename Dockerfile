@@ -39,4 +39,4 @@ RUN mkdir -p /home/vscode/.config/fish/completions && \
         rm /setup
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
-CMD ["/usr/local/bin/supervisor"]
+CMD ["/usr/local/bin/supervisor", "--force"]
