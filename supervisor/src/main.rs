@@ -6,10 +6,7 @@ use anyhow::bail;
 use bytes::Bytes;
 use clap::Parser;
 use env_logger::Env;
-use eos::{
-    ACTOR_DIR, MAILBOX_DIR, MAILBOX_HEAD, PAUSE_FILE, Props, ROOT, Request, Response, SEND_DIR,
-    SPAWN_DIR,
-};
+use eos::{ACTOR_DIR, Dirs, MAILBOX_DIR, MAILBOX_HEAD, PAUSE_FILE, Props, ROOT, Request, Response};
 use faccess::PathExt;
 use futures_util::stream::StreamExt;
 use nanoid::nanoid;
@@ -245,6 +242,23 @@ async fn tick() -> anyhow::Result<u64> {
     }
 }
 
+async fn cleanup() {
+    let Dirs {
+        root_dir,
+        actor_dir,
+        ..
+    } = Dirs::get();
+    if fs::try_exists(root_dir.join(PAUSE_FILE))
+        .await
+        .expect("WHY YOU NO READ FILE?")
+    {
+        return;
+    }
+    if let Err(e) = check_alive(&actor_dir).await {
+        log::error!("{e}");
+    }
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
@@ -267,18 +281,17 @@ async fn main() -> anyhow::Result<()> {
 
     let mut spawn_signal = signal(SignalKind::user_defined1())?;
 
-    let props_dir = root_dir.join(SPAWN_DIR);
-    std::fs::create_dir_all(&props_dir)?;
-
-    let actor_dir = root_dir.join(ACTOR_DIR);
-    std::fs::create_dir_all(&actor_dir)?;
-
-    let send_dir = root_dir.join(SEND_DIR);
-    std::fs::create_dir_all(&send_dir)?;
+    let Dirs {
+        root_dir,
+        actor_dir,
+        spawn_dir,
+        send_dir,
+    } = Dirs::get();
 
     {
+        let root_dir = root_dir.clone();
         let send_dir = send_dir.clone();
-        let props_dir = props_dir.clone();
+        let props_dir = spawn_dir.clone();
         let actor_dir = actor_dir.clone();
         spawn(async move {
             loop {
@@ -298,24 +311,16 @@ async fn main() -> anyhow::Result<()> {
 
     let mut cleanup_signal = signal(SignalKind::user_defined2())?;
     {
-        let actor_dir = actor_dir.clone();
         spawn(async move {
             loop {
                 cleanup_signal.recv().await;
-                if fs::try_exists(root_dir.join(PAUSE_FILE))
-                    .await
-                    .expect("WHY YOU NO READ FILE?")
-                {
-                    continue;
-                }
-                if let Err(e) = check_alive(&actor_dir).await {
-                    log::error!("{e}");
-                }
+                cleanup().await;
             }
         });
     }
 
     {
+        let root_dir = root_dir.clone();
         let actor_dir = actor_dir.clone();
         spawn(async move {
             tokio::signal::ctrl_c()
@@ -331,6 +336,7 @@ async fn main() -> anyhow::Result<()> {
 
     {
         let actor_dir = actor_dir.clone();
+        let root_dir = root_dir.clone();
         spawn(async move {
             loop {
                 tokio::time::sleep(Duration::from_secs(1)).await;
@@ -349,6 +355,7 @@ async fn main() -> anyhow::Result<()> {
 
     if let Ok(client) = async_nats::connect(&nats).await {
         let send_dir = send_dir.clone();
+        let root_dir = root_dir.clone();
         {
             let mut subscriber = client.subscribe("eos.ctl").await.unwrap();
             spawn(async move {
@@ -374,6 +381,9 @@ async fn main() -> anyhow::Result<()> {
                                 {
                                     log::error!("{e}");
                                 }
+                            }
+                            eos::Command::Update => {
+                                cleanup().await;
                             }
                         },
                         Err(e) => log::error!("Invalid message format: {e}"),

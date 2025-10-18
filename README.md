@@ -81,7 +81,7 @@ Once vscode has started and built everything, you should have a running `supervi
 
 To start the provided test actor you can open a terminal in vscode and run the following command:
 ```sh
-eos script /eos/examples/test-actor.rn
+eos spawn script /eos/examples/test-actor.rn
 ```
 
 And to send it a message to see if its working you can use the following:
@@ -96,7 +96,7 @@ which should contain the message tha was sent to it earlier.
 To run your own code and start experimenting, you can write your own actor script in [rune](https://rune-rs.github.io/)
 and spawn it through `eos`:
 ```sh
-eos script /path/to/your/script
+eos spawn script /path/to/your/script
 ```
 
 The rune script must contain the following function:

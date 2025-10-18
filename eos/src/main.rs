@@ -35,16 +35,10 @@ impl Cli {
 
 #[derive(Subcommand)]
 enum Action {
-    /// spawn a script actor
-    Script {
-        /// the script that gets copied into the actor directory,
-        /// which the actor then reads and runs every time it receiving a message
-        script: String,
-    },
-    /// spawn a custom binary as actor
+    /// spawn an actor
     Spawn {
-        /// the path to the binary that gets started as an EOS actor
-        path: String,
+        #[command(subcommand)]
+        command: SpawnCommand,
     },
     /// list all the running actors
     List,
@@ -80,6 +74,12 @@ enum Action {
 }
 
 #[derive(Subcommand)]
+enum SpawnCommand {
+    Script { script: PathBuf },
+    Bin { path: PathBuf },
+}
+
+#[derive(Subcommand)]
 enum TickCommand {
     /// sets the tick rate of the system
     Set {
@@ -105,11 +105,49 @@ fn notify(pid: usize) -> anyhow::Result<()> {
     )?)
 }
 
-fn update(pid: usize) -> anyhow::Result<()> {
+async fn update_nats(client: &Client) -> anyhow::Result<()> {
+    let session = nanoid!();
+
+    let mut sub = client.subscribe(format!("eos.response.{session}")).await?;
+
+    client
+        .publish(
+            EOS_CTL,
+            Bytes::from(serde_json::to_vec(&Request {
+                session_id: session.clone(),
+                cmd: eos::Command::Update,
+            })?),
+        )
+        .await?;
+
+    while let Some(msg) = sub.next().await {
+        if let Ok(response) = serde_json::from_slice::<Response>(&msg.payload) {
+            match response {
+                Response::Done => {}
+                Response::Failed { err } => {
+                    eprintln!("Failed to spawn actor: {err}")
+                }
+                _ => (),
+            }
+            break;
+        }
+    }
+    Ok(())
+}
+
+async fn update_unix(pid: usize) -> anyhow::Result<()> {
     Ok(nix::sys::signal::kill(
         nix::unistd::Pid::from_raw(pid as i32),
         nix::sys::signal::Signal::SIGUSR2,
     )?)
+}
+
+async fn update(nats: Option<Client>) -> anyhow::Result<()> {
+    if let Some(nats) = nats {
+        Ok(update_nats(&nats).await?)
+    } else {
+        Ok(update_unix(get_root_pid()?).await?)
+    }
 }
 
 fn get_root_pid() -> anyhow::Result<usize> {
@@ -141,6 +179,7 @@ async fn spawn_nats(client: &Client, props: Props) -> anyhow::Result<()> {
                 Response::Failed { err } => {
                     eprintln!("Failed to spawn actor: {err}")
                 }
+                _ => (),
             }
             break;
         }
@@ -149,13 +188,21 @@ async fn spawn_nats(client: &Client, props: Props) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn spawn(root: impl AsRef<Path>, props: Props) -> anyhow::Result<()> {
+fn spawn_unix(root: impl AsRef<Path>, props: Props) -> anyhow::Result<()> {
     std::fs::write(
         root.as_ref().join(SPAWN_DIR).join(nanoid!()),
         serde_json::to_string_pretty(&props)?,
     )?;
     notify(get_root_pid()?)?;
     Ok(())
+}
+
+async fn spawn(nats: Option<Client>, root: impl AsRef<Path>, props: Props) -> anyhow::Result<()> {
+    if let Some(nats) = nats {
+        Ok(spawn_nats(&nats, props).await?)
+    } else {
+        Ok(spawn_unix(root, props)?)
+    }
 }
 
 #[tokio::main]
@@ -174,39 +221,31 @@ async fn main() -> anyhow::Result<()> {
     if !pid_file.exists() {
         eprintln!("Actor system is not running!");
     }
-    let client = connect(nats).await.ok();
+    let nats = connect(nats).await.ok();
     match command {
-        Action::Update => update(get_root_pid()?)?,
-        Action::Script { script } => {
-            let props = Props {
-                path: PathBuf::from("/usr/local/bin/script-actor"),
-                copy: vec![std::fs::canonicalize(PathBuf::from(
-                    shellexpand::full(&script)?.to_string(),
-                ))?],
-                ..Default::default()
+        Action::Update => update(nats).await?,
+        Action::Spawn { command } => {
+            let props = match command {
+                SpawnCommand::Script { script } => Props {
+                    path: PathBuf::from("/usr/local/bin/script-actor"),
+                    copy: vec![std::fs::canonicalize(PathBuf::from(
+                        shellexpand::full(&script.display().to_string())?.to_string(),
+                    ))?],
+                    ..Default::default()
+                },
+                SpawnCommand::Bin { path } => Props {
+                    path,
+                    ..Default::default()
+                },
             };
-            if let Some(nats) = client {
-                spawn_nats(&nats, props).await?;
-            } else {
-                spawn(root, props)?;
-            }
-        }
-        Action::Spawn { path } => {
-            let props = Props {
-                path: std::fs::canonicalize(PathBuf::from(shellexpand::full(&path)?.to_string()))?,
-                ..Default::default()
-            };
-            if let Some(nats) = client {
-                spawn_nats(&nats, props).await?;
-            } else {
-                spawn(root, props)?;
-            }
+
+            spawn(nats, root, props).await?;
         }
         Action::List => {
             if !root.join(".pid").exists() {
                 bail!("The actor system isn't running!");
             }
-            update(get_root_pid()?)?;
+            update(nats).await?;
             let mut entries = std::fs::read_dir(root.join(ACTOR_DIR))?;
             while let Some(Ok(dir)) = entries.next() {
                 let actor_dir = dir.path();
@@ -234,7 +273,7 @@ async fn main() -> anyhow::Result<()> {
             let actor_pid_string = std::fs::read_to_string(path.join(".pid"))?;
             let actor_pid = actor_pid_string.parse::<usize>()?;
             kill(actor_pid)?;
-            update(get_root_pid()?)?;
+            update(nats).await?;
         }
         Action::Pause { path } => {
             if !path.join(".pid").exists() {
