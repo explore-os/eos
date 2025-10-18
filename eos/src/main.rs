@@ -1,8 +1,13 @@
 use std::path::{Path, PathBuf};
 
 use anyhow::bail;
-use clap::{Command, Parser, Subcommand};
-use eos::{ACTOR_DIR, PAUSE_FILE, Props, ROOT, SEND_DIR, SPAWN_DIR};
+use async_nats::{Client, connect};
+use bytes::Bytes;
+#[cfg(feature = "_setup")]
+use clap::Command;
+use clap::{Parser, Subcommand};
+use eos::{ACTOR_DIR, EOS_CTL, Envelope, PAUSE_FILE, Props, ROOT, Response, SEND_DIR, SPAWN_DIR};
+use futures_util::StreamExt;
 use nanoid::nanoid;
 
 #[cfg(feature = "_setup")]
@@ -15,6 +20,8 @@ struct SetupCli {
 }
 #[derive(Parser)]
 struct Cli {
+    #[arg(short, long, default_value = "nats://msgbus:4222")]
+    nats: String,
     #[command(subcommand)]
     command: Action,
 }
@@ -110,7 +117,49 @@ fn get_root_pid() -> anyhow::Result<usize> {
     Ok(pid_string.parse::<usize>()?)
 }
 
-fn main() -> anyhow::Result<()> {
+async fn spawn_nats(client: &Client, props: Props) -> anyhow::Result<()> {
+    let session = nanoid!();
+
+    let mut sub = client.subscribe(format!("eos.response.{session}")).await?;
+
+    client
+        .publish(
+            EOS_CTL,
+            Bytes::from(serde_json::to_vec(&Envelope {
+                session_id: session.clone(),
+                payload: eos::Request::Spawn { props },
+            })?),
+        )
+        .await?;
+
+    while let Some(msg) = sub.next().await {
+        use eos::Envelope;
+
+        if let Ok(Envelope {
+            session_id,
+            payload: Response::Spawned { id },
+        }) = serde_json::from_slice::<Envelope<Response>>(&msg.payload)
+            && session_id == session
+        {
+            println!("Actor create with id: {id}");
+            break;
+        }
+    }
+
+    Ok(())
+}
+
+fn spawn(root: impl AsRef<Path>, props: Props) -> anyhow::Result<()> {
+    std::fs::write(
+        root.as_ref().join(SPAWN_DIR).join(nanoid!()),
+        serde_json::to_string_pretty(&props)?,
+    )?;
+    notify(get_root_pid()?)?;
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() -> anyhow::Result<()> {
     #[cfg(feature = "_setup")]
     {
         let SetupCli { out_dir } = SetupCli::parse();
@@ -119,12 +168,13 @@ fn main() -> anyhow::Result<()> {
         std::process::exit(0);
     }
 
-    let Cli { command } = Cli::parse();
+    let Cli { nats, command } = Cli::parse();
     let root = Path::new(ROOT);
     let pid_file = root.join(".pid");
     if !pid_file.exists() {
         eprintln!("Actor system is not running!");
     }
+    let client = connect(nats).await.ok();
     match command {
         Action::Update => update(get_root_pid()?)?,
         Action::Script { script } => {
@@ -135,22 +185,22 @@ fn main() -> anyhow::Result<()> {
                 ))?],
                 ..Default::default()
             };
-            std::fs::write(
-                root.join(SPAWN_DIR).join(nanoid!()),
-                serde_json::to_string_pretty(&props)?,
-            )?;
-            notify(get_root_pid()?)?;
+            if let Some(nats) = client {
+                spawn_nats(&nats, props).await?;
+            } else {
+                spawn(root, props)?;
+            }
         }
         Action::Spawn { path } => {
             let props = Props {
                 path: std::fs::canonicalize(PathBuf::from(shellexpand::full(&path)?.to_string()))?,
                 ..Default::default()
             };
-            std::fs::write(
-                root.join(SPAWN_DIR).join(nanoid!()),
-                serde_json::to_string_pretty(&props)?,
-            )?;
-            notify(get_root_pid()?)?;
+            if let Some(nats) = client {
+                spawn_nats(&nats, props).await?;
+            } else {
+                spawn(root, props)?;
+            }
         }
         Action::List => {
             if !root.join(".pid").exists() {

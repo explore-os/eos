@@ -26,3 +26,6 @@ syslog = "7.0.0"
 tokio = { version = "1.36.0", features = ["full"] }
 tokio-stream = { version = "0.1.14", features = ["io-util"] }
 uuid = { version = "1.7.0", features = ["v4", "serde"] }
+async-nats = "0.44.2"
+futures-util = "0.3.31"
+bytes = { version = "1.10.1", features = ["serde"] }

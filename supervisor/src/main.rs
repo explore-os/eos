@@ -3,14 +3,26 @@ use std::path::Path;
 use std::time::Duration;
 
 use anyhow::bail;
+use bytes::Bytes;
+use clap::Parser;
 use env_logger::Env;
-use eos::{ACTOR_DIR, MAILBOX_DIR, MAILBOX_HEAD, PAUSE_FILE, Props, ROOT, SEND_DIR, SPAWN_DIR};
+use eos::{
+    ACTOR_DIR, Envelope, MAILBOX_DIR, MAILBOX_HEAD, PAUSE_FILE, Props, ROOT, Request, Response,
+    SEND_DIR, SPAWN_DIR,
+};
 use faccess::PathExt;
+use futures_util::stream::StreamExt;
 use nanoid::nanoid;
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::{fs, process::Command, spawn};
 
 const DEFAULT_TICK: u64 = 2000;
+
+#[derive(Parser)]
+struct Cli {
+    #[arg(short, long)]
+    nats: Option<String>,
+}
 
 async fn spawn_actor(
     root: impl AsRef<Path>,
@@ -236,6 +248,7 @@ async fn tick() -> anyhow::Result<u64> {
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
+    let Cli { nats } = Cli::parse();
 
     let root_dir = Path::new(ROOT);
     if root_dir.join(".pid").exists() {
@@ -332,6 +345,31 @@ async fn main() -> anyhow::Result<()> {
                 }
             }
         });
+    }
+
+    if let Some(nats) = nats {
+        let client = async_nats::connect(&nats).await?;
+        let root_dir = root_dir.clone();
+        let send_dir = send_dir.clone();
+        {
+            let mut subscriber = client.subscribe("eos.ctl").await.unwrap();
+            spawn(async move {
+                while let Some(message) = subscriber.next().await {
+                    match serde_json::from_slice::<eos::Request>(&message.payload) {
+                        Ok(Request { id, cmd }) => match cmd {
+                            eos::Command::Spawn { props } => {
+                                spawn_actor(root_dir, send_dir, props).await?;
+                                client.publish(
+                                    format!("eos.response.{id}"),
+                                    Bytes::from(Response::Spawned { id }),
+                                )
+                            }
+                        },
+                        Err(e) => log::error!("Invalid message format: {e}"),
+                    }
+                }
+            })
+        }
     }
 
     loop {
