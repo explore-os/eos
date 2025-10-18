@@ -35,5 +35,3 @@ RUN mkdir -p /home/vscode/.config/fish/completions && \
         rm /setup
 
 RUN go install github.com/nats-io/natscli/nats@latest
-
-ENTRYPOINT ["/usr/local/bin/supervisor"]
