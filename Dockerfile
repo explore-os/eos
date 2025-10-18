@@ -13,7 +13,7 @@ RUN cargo build --release -p eos --features _setup
 RUN mv target/release/eos target/release/setup
 RUN cargo build --release --all
 
-FROM golang AS go
+FROM mcr.microsoft.com/vscode/devcontainers/go AS go
 
 RUN go install github.com/nats-io/natscli/nats@latest
 RUN cp "$(which nats)" /
