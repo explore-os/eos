@@ -1,6 +1,6 @@
 use std::path::PathBuf;
 
-use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde::{Deserialize, Serialize};
 
 pub const ROOT: &str = "/explore";
 pub const PID_FILE: &str = ".pid";
@@ -14,24 +14,19 @@ pub const PAUSE_FILE: &str = "paused";
 pub const EOS_CTL: &str = "eos.ctl";
 
 #[derive(Debug, Serialize, Deserialize)]
-pub struct Envelope<T>
-where
-    T: Serialize + DeserializeOwned,
-{
-    pub session_id: String,
-
-    #[serde(bound = "T: DeserializeOwned")]
-    pub payload: T,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
 pub enum Response {
     Failed { err: String },
     Spawned { id: String },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub enum Request {
+pub struct Request {
+    pub session_id: String,
+    pub cmd: Command,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub enum Command {
     Spawn { props: Props },
 }
 

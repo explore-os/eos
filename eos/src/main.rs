@@ -6,7 +6,7 @@ use bytes::Bytes;
 #[cfg(feature = "_setup")]
 use clap::Command;
 use clap::{Parser, Subcommand};
-use eos::{ACTOR_DIR, EOS_CTL, Envelope, PAUSE_FILE, Props, ROOT, Response, SEND_DIR, SPAWN_DIR};
+use eos::{ACTOR_DIR, EOS_CTL, PAUSE_FILE, Props, ROOT, Request, Response, SEND_DIR, SPAWN_DIR};
 use futures_util::StreamExt;
 use nanoid::nanoid;
 
@@ -125,23 +125,23 @@ async fn spawn_nats(client: &Client, props: Props) -> anyhow::Result<()> {
     client
         .publish(
             EOS_CTL,
-            Bytes::from(serde_json::to_vec(&Envelope {
+            Bytes::from(serde_json::to_vec(&Request {
                 session_id: session.clone(),
-                payload: eos::Request::Spawn { props },
+                cmd: eos::Command::Spawn { props },
             })?),
         )
         .await?;
 
     while let Some(msg) = sub.next().await {
-        use eos::Envelope;
-
-        if let Ok(Envelope {
-            session_id,
-            payload: Response::Spawned { id },
-        }) = serde_json::from_slice::<Envelope<Response>>(&msg.payload)
-            && session_id == session
-        {
-            println!("Actor create with id: {id}");
+        if let Ok(response) = serde_json::from_slice::<Response>(&msg.payload) {
+            match response {
+                Response::Spawned { id } => {
+                    println!("Actor spawned with id: {id}");
+                }
+                Response::Failed { err } => {
+                    eprintln!("Failed to spawn actor: {err}")
+                }
+            }
             break;
         }
     }

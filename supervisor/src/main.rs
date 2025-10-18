@@ -7,8 +7,8 @@ use bytes::Bytes;
 use clap::Parser;
 use env_logger::Env;
 use eos::{
-    ACTOR_DIR, Envelope, MAILBOX_DIR, MAILBOX_HEAD, PAUSE_FILE, Props, ROOT, Request, Response,
-    SEND_DIR, SPAWN_DIR,
+    ACTOR_DIR, MAILBOX_DIR, MAILBOX_HEAD, PAUSE_FILE, Props, ROOT, Request, Response, SEND_DIR,
+    SPAWN_DIR,
 };
 use faccess::PathExt;
 use futures_util::stream::StreamExt;
@@ -20,8 +20,8 @@ const DEFAULT_TICK: u64 = 2000;
 
 #[derive(Parser)]
 struct Cli {
-    #[arg(short, long)]
-    nats: Option<String>,
+    #[arg(short, long, default_value = "nats://msgbus:4222")]
+    nats: String,
 }
 
 async fn spawn_actor(
@@ -347,19 +347,15 @@ async fn main() -> anyhow::Result<()> {
         });
     }
 
-    if let Some(nats) = nats {
-        let client = async_nats::connect(&nats).await?;
+    if let Ok(client) = async_nats::connect(&nats).await {
         let send_dir = send_dir.clone();
         {
             let mut subscriber = client.subscribe("eos.ctl").await.unwrap();
             spawn(async move {
                 while let Some(message) = subscriber.next().await {
-                    match serde_json::from_slice::<eos::Envelope<Request>>(&message.payload) {
-                        Ok(Envelope {
-                            session_id,
-                            payload,
-                        }) => match payload {
-                            eos::Request::Spawn { props } => {
+                    match serde_json::from_slice::<eos::Request>(&message.payload) {
+                        Ok(Request { session_id, cmd }) => match cmd {
+                            eos::Command::Spawn { props } => {
                                 let response = match spawn_actor(root_dir, &send_dir, props).await {
                                     Ok(id) => Response::Spawned { id },
                                     Err(err) => Response::Failed {
@@ -369,13 +365,7 @@ async fn main() -> anyhow::Result<()> {
                                 if let Err(e) = client
                                     .publish(
                                         format!("eos.response.{session_id}"),
-                                        Bytes::from(
-                                            serde_json::to_vec(&Envelope {
-                                                session_id,
-                                                payload: response,
-                                            })
-                                            .unwrap(),
-                                        ),
+                                        Bytes::from(serde_json::to_vec(&response).unwrap()),
                                     )
                                     .await
                                 {
