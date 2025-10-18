@@ -61,6 +61,41 @@ enum Action {
         /// the directory for the actor to unpause
         path: PathBuf,
     },
+    /// puts message in the send queue and notifies the supervisor that a message is available
+    Send {
+        /// the id of the sender
+        #[arg(short, long)]
+        sender: Option<PathBuf>,
+        /// the path to the actor the message should be sent
+        path: PathBuf,
+        /// a string containing the json representation of a message
+        msg: String,
+    },
+    /// kills an actor
+    Kill {
+        /// the path to the actor that should be killed
+        path: PathBuf,
+    },
+    /// changes the tick rate of the system
+    Tick {
+        #[command(subcommand)]
+        command: TickCommand,
+    },
+    /// handles "db" access
+    Db {
+        #[command(subcommand)]
+        command: DbCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum SpawnCommand {
+    Script { script: PathBuf },
+    Bin { path: PathBuf },
+}
+
+#[derive(Subcommand)]
+enum DbCommand {
     /// store a value in an actors kv-store
     Store {
         /// path to the owning actor
@@ -84,32 +119,13 @@ enum Action {
         /// the key to load
         key: String,
     },
-    /// puts message in the send queue and notifies the supervisor that a message is available
-    Send {
-        /// the id of the sender
-        #[arg(short, long)]
-        sender: Option<PathBuf>,
-        /// the path to the actor the message should be sent
+    /// checks if a value in an actors kv-store exists
+    Exists {
+        /// path to the owning actor
         path: PathBuf,
-        /// a string containing the json representation of a message
-        msg: String,
+        /// the key to check
+        key: String,
     },
-    /// kills an actor
-    Kill {
-        /// the path to the actor that should be killed
-        path: PathBuf,
-    },
-    /// changes the tick rate of the system
-    Tick {
-        #[command(subcommand)]
-        command: TickCommand,
-    },
-}
-
-#[derive(Subcommand)]
-enum SpawnCommand {
-    Script { script: PathBuf },
-    Bin { path: PathBuf },
 }
 
 #[derive(Subcommand)]
@@ -367,33 +383,43 @@ async fn main() -> anyhow::Result<()> {
     }
     let nats = connect(nats).await.ok();
     match command {
-        Action::Store { path, key, value } => {
-            db_action(
-                nats,
-                path.file_name().unwrap().display().to_string(),
-                DbAction::Store {
-                    key,
-                    value: serde_json::to_value(&value)?,
-                },
-            )
-            .await?;
-        }
-        Action::Delete { path, key } => {
-            db_action(
-                nats,
-                path.file_name().unwrap().display().to_string(),
-                DbAction::Delete { key },
-            )
-            .await?;
-        }
-        Action::Load { path, key } => {
-            db_action(
-                nats,
-                path.file_name().unwrap().display().to_string(),
-                DbAction::Load { key },
-            )
-            .await?;
-        }
+        Action::Db { command } => match command {
+            DbCommand::Store { path, key, value } => {
+                db_action(
+                    nats,
+                    path.file_name().unwrap().display().to_string(),
+                    DbAction::Store {
+                        key,
+                        value: serde_json::to_value(&value)?,
+                    },
+                )
+                .await?;
+            }
+            DbCommand::Delete { path, key } => {
+                db_action(
+                    nats,
+                    path.file_name().unwrap().display().to_string(),
+                    DbAction::Delete { key },
+                )
+                .await?;
+            }
+            DbCommand::Load { path, key } => {
+                db_action(
+                    nats,
+                    path.file_name().unwrap().display().to_string(),
+                    DbAction::Load { key },
+                )
+                .await?;
+            }
+            DbCommand::Exists { path, key } => {
+                db_action(
+                    nats,
+                    path.file_name().unwrap().display().to_string(),
+                    DbAction::Exists { key },
+                )
+                .await?;
+            }
+        },
         Action::Update => update(nats).await?,
         Action::Spawn { id, command } => {
             let props = match command {
