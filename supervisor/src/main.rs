@@ -356,12 +356,15 @@ async fn main() -> anyhow::Result<()> {
                     match serde_json::from_slice::<eos::Request>(&message.payload) {
                         Ok(Request { session_id, cmd }) => match cmd {
                             eos::Command::Spawn { props } => {
-                                let response = match spawn_actor(root_dir, &send_dir, props).await {
-                                    Ok(id) => Response::Spawned { id },
-                                    Err(err) => Response::Failed {
-                                        err: err.to_string(),
-                                    },
-                                };
+                                let response =
+                                    match spawn_actor(root_dir.join(ACTOR_DIR), &send_dir, props)
+                                        .await
+                                    {
+                                        Ok(id) => Response::Spawned { id },
+                                        Err(err) => Response::Failed {
+                                            err: err.to_string(),
+                                        },
+                                    };
                                 if let Err(e) = client
                                     .publish(
                                         format!("eos.response.{session_id}"),
