@@ -37,6 +37,8 @@ impl Cli {
 enum Action {
     /// spawn an actor
     Spawn {
+        #[arg(short, long)]
+        id: Option<String>,
         #[command(subcommand)]
         command: SpawnCommand,
     },
@@ -224,9 +226,10 @@ async fn main() -> anyhow::Result<()> {
     let nats = connect(nats).await.ok();
     match command {
         Action::Update => update(nats).await?,
-        Action::Spawn { command } => {
+        Action::Spawn { id, command } => {
             let props = match command {
                 SpawnCommand::Script { script } => Props {
+                    id,
                     path: PathBuf::from("/usr/local/bin/script-actor"),
                     copy: vec![std::fs::canonicalize(PathBuf::from(
                         shellexpand::full(&script.display().to_string())?.to_string(),
@@ -234,6 +237,7 @@ async fn main() -> anyhow::Result<()> {
                     ..Default::default()
                 },
                 SpawnCommand::Bin { path } => Props {
+                    id,
                     path,
                     ..Default::default()
                 },

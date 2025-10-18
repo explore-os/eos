@@ -6,7 +6,10 @@ use anyhow::bail;
 use bytes::Bytes;
 use clap::Parser;
 use env_logger::Env;
-use eos::{ACTOR_DIR, Dirs, MAILBOX_DIR, MAILBOX_HEAD, PAUSE_FILE, Props, ROOT, Request, Response};
+use eos::{
+    ACTOR_DIR, Dirs, MAILBOX_DIR, MAILBOX_HEAD, PAUSE_FILE, PID_FILE, Props, ROOT, Request,
+    Response, TICK_FILE,
+};
 use faccess::PathExt;
 use futures_util::stream::StreamExt;
 use nanoid::nanoid;
@@ -33,8 +36,17 @@ async fn spawn_actor(
     if !props.path.executable() {
         bail!("{} is not an executable file", props.path.display());
     }
-    let id = nanoid!();
+    let id = props.id.unwrap_or_else(|| nanoid!());
     let actor_dir = root.as_ref().join(&id);
+    if fs::try_exists(&actor_dir).await? {
+        let pid_file = actor_dir.join(PID_FILE);
+        if fs::try_exists(&pid_file).await? {
+            let pid = fs::read_to_string(pid_file).await?;
+            if fs::try_exists(Path::new("/proc").join(&pid)).await? {
+                bail!("There already exists an actor with the id: {id}");
+            }
+        }
+    }
     fs::create_dir_all(&actor_dir).await?;
     for f in &props.copy {
         fs::copy(f, actor_dir.join(f.file_name().unwrap())).await?;
@@ -59,7 +71,7 @@ async fn spawn_actor(
         .spawn()?;
 
     fs::write(
-        actor_dir.join(".pid"),
+        actor_dir.join(PID_FILE),
         process.id().unwrap_or_default().to_string(),
     )
     .await?;
@@ -143,7 +155,7 @@ async fn check_actors(actor_dir: impl AsRef<Path>, tick: u64) -> anyhow::Result<
         }
         if move_next_message(&message_dir, tick).await? {
             tokio::time::sleep(Duration::from_millis(tick)).await;
-            let pid = fs::read_to_string(actor_dir.join(".pid"))
+            let pid = fs::read_to_string(actor_dir.join(PID_FILE))
                 .await?
                 .parse::<usize>()?;
             nix::sys::signal::kill(
@@ -161,7 +173,7 @@ async fn kill_actors(actor_dir: impl AsRef<Path>) -> anyhow::Result<()> {
         if entry.path().is_file() {
             continue;
         }
-        let pid_string = fs::read_to_string(entry.path().join(".pid")).await?;
+        let pid_string = fs::read_to_string(entry.path().join(PID_FILE)).await?;
         let pid = pid_string.parse::<usize>()?;
 
         nix::sys::signal::kill(
@@ -187,7 +199,7 @@ async fn check_alive(actor_dir: impl AsRef<Path>) -> anyhow::Result<()> {
         if entry.path().is_file() {
             continue;
         }
-        let pid_string = fs::read_to_string(entry.path().join(".pid")).await?;
+        let pid_string = fs::read_to_string(entry.path().join(PID_FILE)).await?;
         let pid = pid_string.parse::<usize>()?;
         if !fs::try_exists(Path::new("/proc").join(format!("{pid}"))).await? {
             fs::remove_dir_all(entry.path()).await?;
@@ -233,7 +245,7 @@ async fn check_queue(
 }
 
 async fn tick() -> anyhow::Result<u64> {
-    let tick_path = Path::new(ROOT).join(".tick");
+    let tick_path = Path::new(ROOT).join(TICK_FILE);
     if fs::try_exists(&tick_path).await? {
         Ok(fs::read_to_string(tick_path).await?.trim().parse()?)
     } else {
@@ -265,17 +277,17 @@ async fn main() -> anyhow::Result<()> {
     let Cli { nats } = Cli::parse();
 
     let root_dir = Path::new(ROOT);
-    if root_dir.join(".pid").exists() {
+    if root_dir.join(PID_FILE).exists() {
         eprintln!(
             "The pid file for the supervisor already exists, terminating. If the supervisor is not running, feel free to delete the file and try again. ({})",
-            root_dir.join(".pid").display()
+            root_dir.join(PID_FILE).display()
         );
         return Ok(());
     }
 
     let pid = std::process::id();
     log::info!("Running as PID: {pid}",);
-    fs::write(root_dir.join(".pid"), format!("{pid}")).await?;
+    fs::write(root_dir.join(PID_FILE), format!("{pid}")).await?;
 
     log::info!("supervisor started");
 
@@ -327,8 +339,8 @@ async fn main() -> anyhow::Result<()> {
                 .await
                 .expect("Muahahaha, this should never happen!");
             log::info!("Actor system is shutting down");
-            _ = fs::remove_file(root_dir.join(".pid")).await;
-            _ = fs::remove_file(root_dir.join(".tick")).await;
+            _ = fs::remove_file(root_dir.join(PID_FILE)).await;
+            _ = fs::remove_file(root_dir.join(TICK_FILE)).await;
             _ = kill_actors(&actor_dir).await;
             std::process::exit(0);
         });

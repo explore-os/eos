@@ -71,6 +71,7 @@ pub enum Command {
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Props {
+    pub id: Option<String>,
     pub path: PathBuf,
     #[serde(default)]
     pub args: Vec<String>,
