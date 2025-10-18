@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
-pub const ROOT: &str = "/eos";
+pub const ROOT: &str = "/explore";
 pub const PID_FILE: &str = ".pid";
 pub const TICK_FILE: &str = ".tick";
 pub const MAILBOX_DIR: &str = "spool";
