@@ -13,7 +13,9 @@ RUN cargo build --release -p eos --features _setup
 RUN mv target/release/eos target/release/setup
 RUN cargo build --release --all
 
-FROM mcr.microsoft.com/vscode/devcontainers/go AS runtime
+FROM bitnami/natscli:latest AS natscli
+
+FROM mcr.microsoft.com/vscode/devcontainers/base:debian AS runtime
 
 RUN apt-get update && \
         apt-get install -y --no-install-recommends git ca-certificates curl fish bash sudo && \
@@ -38,7 +40,7 @@ RUN mkdir -p /home/vscode/.config/fish/completions && \
         chown -R vscode:vscode /home/vscode && \
         rm /setup
 
-RUN go install github.com/nats-io/natscli/nats@latest
+COPY --from=natscli /opt/bitnami/natscli/bin/nats /usr/local/bin/nats
 
 ENTRYPOINT ["docker-entrypoint.sh"]
 CMD ["/usr/local/bin/supervisor"]
