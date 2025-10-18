@@ -349,7 +349,6 @@ async fn main() -> anyhow::Result<()> {
 
     if let Some(nats) = nats {
         let client = async_nats::connect(&nats).await?;
-        let root_dir = root_dir.clone();
         let send_dir = send_dir.clone();
         {
             let mut subscriber = client.subscribe("eos.ctl").await.unwrap();
@@ -360,20 +359,28 @@ async fn main() -> anyhow::Result<()> {
                             session_id,
                             payload,
                         }) => match payload {
-                            eos::Command::Spawn { props } => {
-                                let response = match spawn_actor(root_dir, send_dir, props).await {
+                            eos::Request::Spawn { props } => {
+                                let response = match spawn_actor(root_dir, &send_dir, props).await {
                                     Ok(id) => Response::Spawned { id },
                                     Err(err) => Response::Failed {
                                         err: err.to_string(),
                                     },
                                 };
-                                client.publish(
-                                    format!("eos.response.{session_id}"),
-                                    Bytes::from(serde_json::to_vec(&Envelope {
-                                        session_id,
-                                        payload: response,
-                                    })?),
-                                )
+                                if let Err(e) = client
+                                    .publish(
+                                        format!("eos.response.{session_id}"),
+                                        Bytes::from(
+                                            serde_json::to_vec(&Envelope {
+                                                session_id,
+                                                payload: response,
+                                            })
+                                            .unwrap(),
+                                        ),
+                                    )
+                                    .await
+                                {
+                                    log::error!("{e}");
+                                }
                             }
                         },
                         Err(e) => log::error!("Invalid message format: {e}"),
