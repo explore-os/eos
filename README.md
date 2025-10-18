@@ -107,6 +107,16 @@ pub fn handle(state, msg) {
 }
 ```
 
+If the script contains a public function called `init`, it will call it after the actor started and
+write the result of the init function the the actors state file.
+
+e.g.:
+```rs
+pub fn init() {
+    return #{initial_value: 10};
+}
+```
+
 The script actor reads the state from the its state file every time a message arrives and passes it as
 first argument to your handle function. The message gets passed as a second argument.
 
