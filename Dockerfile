@@ -13,7 +13,7 @@ RUN cargo build --release -p eos --features _setup
 RUN mv target/release/eos target/release/setup
 RUN cargo build --release --all
 
-FROM mcr.microsoft.com/vscode/devcontainers/base:debian AS runtime
+FROM mcr.microsoft.com/vscode/devcontainers/go AS runtime
 
 RUN apt-get update && \
         apt-get install -y --no-install-recommends git ca-certificates curl fish bash sudo && \
@@ -25,13 +25,15 @@ COPY --from=builder /app/target/release/eos /usr/local/bin
 COPY --from=builder /app/target/release/script-actor /usr/local/bin
 COPY --from=builder /app/target/release/setup /
 
-RUN mkdir /eos
-COPY --from=builder /app/examples /eos/examples
-COPY --from=builder /app/README.md /eos/README.md
-RUN chown -R vscode:vscode /eos
+RUN mkdir /explore
+COPY --from=builder /app/examples /explore/examples
+COPY --from=builder /app/README.md /explore/README.md
+RUN chown -R vscode:vscode /explore
 RUN mkdir -p /home/vscode/.config/fish/completions && \
         /setup /home/vscode/.config/fish/completions && \
         chown -R vscode:vscode /home/vscode && \
         rm /setup
+
+RUN go install github.com/nats-io/natscli/nats@latest
 
 ENTRYPOINT ["/usr/local/bin/supervisor"]
