@@ -276,7 +276,13 @@ async fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
     let Cli { nats } = Cli::parse();
 
-    let root_dir = Path::new(ROOT);
+    let Dirs {
+        root_dir,
+        actor_dir,
+        spawn_dir,
+        send_dir,
+    } = Dirs::init()?;
+
     if root_dir.join(PID_FILE).exists() {
         eprintln!(
             "The pid file for the supervisor already exists, terminating. If the supervisor is not running, feel free to delete the file and try again. ({})",
@@ -292,13 +298,6 @@ async fn main() -> anyhow::Result<()> {
     log::info!("supervisor started");
 
     let mut spawn_signal = signal(SignalKind::user_defined1())?;
-
-    let Dirs {
-        root_dir,
-        actor_dir,
-        spawn_dir,
-        send_dir,
-    } = Dirs::get();
 
     {
         let root_dir = root_dir.clone();
