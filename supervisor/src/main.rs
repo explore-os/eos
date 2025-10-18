@@ -431,6 +431,7 @@ async fn main() -> anyhow::Result<()> {
     if let Ok(client) = async_nats::connect(&nats).await {
         let send_dir = send_dir.clone();
         let root_dir = root_dir.clone();
+        let db = db.clone();
         {
             let mut subscriber = client.subscribe("eos.ctl").await.unwrap();
             spawn(async move {
@@ -493,6 +494,36 @@ async fn main() -> anyhow::Result<()> {
                                     .await
                                 {
                                     log::error!("{e}");
+                                }
+                            }
+                            eos::Command::Db { owner, action } => {
+                                if let Some(base) = &db {
+                                    let db = Database::create(base.join(owner)).unwrap();
+                                    let response = match db_execute(db, action) {
+                                        Err(e) => {
+                                            log::error!("{e}");
+                                            DbResponse {
+                                                success: false,
+                                                data: None,
+                                            }
+                                        }
+                                        Ok(data) => DbResponse {
+                                            success: true,
+                                            data,
+                                        },
+                                    };
+                                    if let Err(e) = client
+                                        .publish(
+                                            format!("eos.response.{session_id}"),
+                                            Bytes::from(
+                                                serde_json::to_vec(&Response::Db { response })
+                                                    .unwrap(),
+                                            ),
+                                        )
+                                        .await
+                                    {
+                                        log::error!("{e}");
+                                    }
                                 }
                             }
                         },

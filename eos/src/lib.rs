@@ -56,6 +56,7 @@ pub enum Response {
     Failed { err: String },
     Spawned { id: String },
     Actors { actors: Vec<String> },
+    Db { response: DbResponse },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -69,6 +70,7 @@ pub enum Command {
     Spawn { props: Props },
     List,
     Update,
+    Db { owner: String, action: DbAction },
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]

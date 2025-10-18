@@ -7,8 +7,8 @@ use bytes::Bytes;
 use clap::Command;
 use clap::{Parser, Subcommand};
 use eos::{
-    Dirs, EOS_CTL, Message, PAUSE_FILE, PID_FILE, Props, ROOT, Request, Response, SEND_DIR,
-    SPAWN_DIR, TICK_FILE,
+    DbAction, DbResponse, Dirs, EOS_CTL, Message, PAUSE_FILE, PID_FILE, Props, ROOT, Request,
+    Response, SEND_DIR, SPAWN_DIR, TICK_FILE,
 };
 use futures_util::StreamExt;
 use nanoid::nanoid;
@@ -60,6 +60,29 @@ enum Action {
     Unpause {
         /// the directory for the actor to unpause
         path: PathBuf,
+    },
+    /// store a value in an actors kv-store
+    Store {
+        /// path to the owning actor
+        path: PathBuf,
+        /// the key to store
+        key: String,
+        /// the value to store
+        value: String,
+    },
+    /// delete a value in an actors kv-store
+    Delete {
+        /// path to the owning actor
+        path: PathBuf,
+        /// the key to delete
+        key: String,
+    },
+    /// load a value from an actors kv-store
+    Load {
+        /// path to the owning actor
+        path: PathBuf,
+        /// the key to load
+        key: String,
     },
     /// puts message in the send queue and notifies the supervisor that a message is available
     Send {
@@ -285,6 +308,47 @@ async fn list(nats: Option<Client>) -> anyhow::Result<()> {
     }
 }
 
+async fn db_action(nats: Option<Client>, owner: String, action: DbAction) -> anyhow::Result<()> {
+    match nats {
+        Some(client) => {
+            let session = nanoid!();
+
+            let mut sub = client.subscribe(format!("eos.response.{session}")).await?;
+
+            client
+                .publish(
+                    EOS_CTL,
+                    Bytes::from(serde_json::to_vec(&Request {
+                        session_id: session.clone(),
+                        cmd: eos::Command::Db { owner, action },
+                    })?),
+                )
+                .await?;
+
+            while let Some(msg) = sub.next().await {
+                if let Ok(response) = serde_json::from_slice::<Response>(&msg.payload) {
+                    if let Response::Db {
+                        response: DbResponse { success, data },
+                    } = response
+                    {
+                        if success {
+                            println!("DB action was executed successfully!");
+                            if let Some(data) = data {
+                                println!("Result: {}", serde_json::to_string_pretty(&data)?);
+                            }
+                        } else {
+                            println!("DB action failed!");
+                        }
+                    }
+                    break;
+                }
+            }
+        }
+        None => eprintln!("DB actions are only available through nats"),
+    }
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     #[cfg(feature = "_setup")]
@@ -303,6 +367,33 @@ async fn main() -> anyhow::Result<()> {
     }
     let nats = connect(nats).await.ok();
     match command {
+        Action::Store { path, key, value } => {
+            db_action(
+                nats,
+                path.file_name().unwrap().display().to_string(),
+                DbAction::Store {
+                    key,
+                    value: serde_json::to_value(&value)?,
+                },
+            )
+            .await?;
+        }
+        Action::Delete { path, key } => {
+            db_action(
+                nats,
+                path.file_name().unwrap().display().to_string(),
+                DbAction::Delete { key },
+            )
+            .await?;
+        }
+        Action::Load { path, key } => {
+            db_action(
+                nats,
+                path.file_name().unwrap().display().to_string(),
+                DbAction::Load { key },
+            )
+            .await?;
+        }
         Action::Update => update(nats).await?,
         Action::Spawn { id, command } => {
             let props = match command {
@@ -327,9 +418,6 @@ async fn main() -> anyhow::Result<()> {
             list(nats).await?;
         }
         Action::Send { path, msg, sender } => {
-            if !path.join(PID_FILE).exists() {
-                bail!("There is no actor running in the specified directory!");
-            }
             let id = path.file_name().expect("Invalid path!").display();
             let sender = if let Some(sender) = sender {
                 if !sender.join(PID_FILE).exists() {
