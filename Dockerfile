@@ -45,5 +45,5 @@ RUN mkdir -p /home/vscode/.config/fish/completions && \
 
 COPY --from=go /nats /usr/local/bin
 
-ENTRYPOINT ["docker-entrypoint.sh"]
+ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["/usr/local/bin/supervisor"]
