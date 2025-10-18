@@ -80,7 +80,7 @@ fn module(send_dir: impl AsRef<Path>, id: &str) -> Result<Module, ContextError> 
         std::fs::write(
             send_dir.join(format!("{to}::{}", nanoid!())),
             serde_json::to_string_pretty(&Message {
-                sender: id.to_string(),
+                sender: Some(id.to_string()),
                 payload: serde_json::to_value(value).unwrap(),
             })
             .unwrap(),

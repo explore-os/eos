@@ -6,7 +6,9 @@ use bytes::Bytes;
 #[cfg(feature = "_setup")]
 use clap::Command;
 use clap::{Parser, Subcommand};
-use eos::{ACTOR_DIR, EOS_CTL, PAUSE_FILE, Props, ROOT, Request, Response, SEND_DIR, SPAWN_DIR};
+use eos::{
+    ACTOR_DIR, EOS_CTL, Message, PAUSE_FILE, Props, ROOT, Request, Response, SEND_DIR, SPAWN_DIR,
+};
 use futures_util::StreamExt;
 use nanoid::nanoid;
 
@@ -37,6 +39,7 @@ impl Cli {
 enum Action {
     /// spawn an actor
     Spawn {
+        /// the requested id for the actor
         #[arg(short, long)]
         id: Option<String>,
         #[command(subcommand)]
@@ -58,6 +61,9 @@ enum Action {
     },
     /// puts message in the send queue and notifies the supervisor that a message is available
     Send {
+        /// the id of the sender
+        #[arg(short, long)]
+        sender: Option<String>,
         /// the path to the actor the message should be sent
         path: PathBuf,
         /// a string containing the json representation of a message
@@ -259,7 +265,7 @@ async fn main() -> anyhow::Result<()> {
                 println!("{}", dir.file_name().display());
             }
         }
-        Action::Send { path, msg } => {
+        Action::Send { path, msg, sender } => {
             if !path.join(".pid").exists() {
                 bail!("There is no actor running in the specified directory!");
             }
@@ -267,7 +273,10 @@ async fn main() -> anyhow::Result<()> {
             std::fs::write(
                 root.join(SEND_DIR)
                     .join(format!("{id}::{}.json", nanoid!())),
-                serde_json::to_string_pretty(&serde_json::from_str::<serde_json::Value>(&msg)?)?,
+                serde_json::to_string_pretty(&Message {
+                    sender,
+                    payload: serde_json::from_str::<serde_json::Value>(&msg)?,
+                })?,
             )?;
         }
         Action::Kill { path } => {

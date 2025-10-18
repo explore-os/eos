@@ -81,6 +81,6 @@ pub struct Props {
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Message {
-    pub sender: String,
+    pub sender: Option<String>,
     pub payload: serde_json::Value,
 }
