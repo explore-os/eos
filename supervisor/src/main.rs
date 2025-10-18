@@ -369,7 +369,10 @@ async fn main() -> anyhow::Result<()> {
                                 };
                                 client.publish(
                                     format!("eos.response.{session_id}"),
-                                    Bytes::from(response),
+                                    Bytes::from(serde_json::to_vec(&Envelope {
+                                        session_id,
+                                        payload: response,
+                                    })?),
                                 )
                             }
                         },
