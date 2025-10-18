@@ -4,6 +4,7 @@ This project is an experimental **actor system built on the Linux filesystem and
 It acts like a **sandbox for exploring system behavior** - you can model services, send messages, and eventually pause,
 inspect, and edit interactions at runtime. Think of it as a **lightweight debugger for distributed systems**.
 
+- [Work in Progress](#work-in-progress)
 - [Introduction](#introduction)
 - [Why?](#why)
 - [Getting started](#getting-started)
@@ -11,6 +12,10 @@ inspect, and edit interactions at runtime. Think of it as a **lightweight debugg
 - [Whats next](#whats-next)
 
 ---
+
+## Work in Progress
+Before we get into any details, please not that everything here is still pretty much `Work in Progress`,
+so do expect things to break. Once the project is stable enough, I will remove this notice.
 
 ## Introduction
 This project is an experiment in building an **actor system on top of the Linux filesystem and signals**.
