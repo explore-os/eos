@@ -355,8 +355,11 @@ async fn main() -> anyhow::Result<()> {
             let mut subscriber = client.subscribe("eos.ctl").await.unwrap();
             spawn(async move {
                 while let Some(message) = subscriber.next().await {
-                    match serde_json::from_slice::<eos::Request>(&message.payload) {
-                        Ok(Request { id, cmd }) => match cmd {
+                    match serde_json::from_slice::<eos::Envelope<Request>>(&message.payload) {
+                        Ok(Envelope {
+                            session_id,
+                            payload,
+                        }) => match payload {
                             eos::Command::Spawn { props } => {
                                 let response = match spawn_actor(root_dir, send_dir, props).await {
                                     Ok(id) => Response::Spawned { id },
@@ -364,7 +367,10 @@ async fn main() -> anyhow::Result<()> {
                                         err: err.to_string(),
                                     },
                                 };
-                                client.publish(format!("eos.response.{id}"), Bytes::from(response))
+                                client.publish(
+                                    format!("eos.response.{session_id}"),
+                                    Bytes::from(response),
+                                )
                             }
                         },
                         Err(e) => log::error!("Invalid message format: {e}"),
