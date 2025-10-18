@@ -27,7 +27,6 @@ COPY --from=builder /app/target/release/setup /
 
 RUN mkdir /explore
 COPY --from=builder /app/examples /explore/examples
-COPY --from=builder /app/README.md /explore/README.md
 
 COPY --from=builder /app/docker-entrypoint.sh /
 RUN chmod +x /docker-entrypoint.sh
