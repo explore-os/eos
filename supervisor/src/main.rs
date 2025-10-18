@@ -395,6 +395,15 @@ async fn main() -> anyhow::Result<()> {
                             }
                             eos::Command::Update => {
                                 cleanup().await;
+                                if let Err(e) = client
+                                    .publish(
+                                        format!("eos.response.{session_id}"),
+                                        Bytes::from(serde_json::to_vec(&Response::Done).unwrap()),
+                                    )
+                                    .await
+                                {
+                                    log::error!("{e}");
+                                }
                             }
                             eos::Command::List => {
                                 let Dirs { actor_dir, .. } = Dirs::get();
