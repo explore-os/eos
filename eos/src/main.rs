@@ -95,7 +95,7 @@ enum Action {
         command: DbCommand,
     },
     /// send data to a teleplot instance
-    Teleplot { value: String },
+    Plot { value: String },
 }
 
 #[derive(Subcommand)]
@@ -465,7 +465,7 @@ async fn main() -> anyhow::Result<()> {
                 .arg(path.join(STATE_FILE))
                 .spawn()?;
         }
-        Action::Teleplot { value } => {
+        Action::Plot { value } => {
             eos::teleplot(&value)?;
         }
     }
