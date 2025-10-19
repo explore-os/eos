@@ -339,6 +339,9 @@ async fn send<T: Serialize>(id: String, msg: T) -> anyhow::Result<()> {
 async fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
     let Cli { force, nats, db } = Cli::parse();
+    if let Some(db) = &db {
+        fs::create_dir_all(db).await?;
+    }
 
     let Dirs {
         root_dir,
