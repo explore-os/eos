@@ -1,7 +1,4 @@
-use std::{
-    path::{Path, PathBuf},
-    process::Command,
-};
+use std::path::{Path, PathBuf};
 
 use anyhow::bail;
 use async_nats::{Client, connect};
@@ -500,7 +497,7 @@ async fn main() -> anyhow::Result<()> {
             TickCommand::Reset => std::fs::remove_file(root.join(TICK_FILE))?,
         },
         Action::Edit { path } => {
-            _ = Command::new("code").arg(path).spawn()?;
+            _ = std::process::Command::new("code").arg(path).spawn()?;
         }
     }
     Ok(())
