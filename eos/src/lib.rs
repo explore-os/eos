@@ -10,6 +10,7 @@ pub const TICK_FILE: &str = ".tick";
 pub const MAILBOX_DIR: &str = "spool";
 pub const MAILBOX_HEAD: &str = "current";
 pub const ACTOR_DIR: &str = "actors";
+pub const STORAGE_DIR: &str = "storage";
 pub const SPAWN_DIR: &str = "spawn";
 pub const SEND_DIR: &str = "send";
 pub const PAUSE_FILE: &str = "paused";
@@ -51,14 +52,12 @@ impl Dirs {
     }
     pub fn get() -> Self {
         let root = PathBuf::from(ROOT);
-        let actor_dir = root.join(ACTOR_DIR);
-        let storage_dir = actor_dir.join("storage");
         Self {
             root_dir: root.clone(),
             spawn_dir: root.join(SPAWN_DIR),
-            actor_dir,
+            actor_dir: root.join(ACTOR_DIR),
+            storage_dir: root.join(STORAGE_DIR),
             send_dir: root.join(SEND_DIR),
-            storage_dir,
         }
     }
 }
@@ -108,17 +107,19 @@ pub fn teleplot(value: &str) -> anyhow::Result<()> {
 
 #[derive(Clone)]
 pub struct Db {
-    id: String,
+    name: String,
 }
 
 impl Db {
-    pub fn new(id: &str) -> anyhow::Result<Self> {
-        Ok(Self { id: id.to_string() })
+    pub fn new(name: &str) -> Self {
+        Self {
+            name: name.to_string(),
+        }
     }
 
     fn db(&self) -> anyhow::Result<Database> {
         let Dirs { storage_dir, .. } = Dirs::get();
-        Ok(Database::create(storage_dir.join(&self.id))?)
+        Ok(Database::create(storage_dir.join(&self.name))?)
     }
 
     pub fn stats(&self) -> anyhow::Result<CacheStats> {

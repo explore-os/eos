@@ -88,8 +88,8 @@ enum Action {
     },
     /// handles "db" access
     Db {
-        /// path to the owning actor
-        path: PathBuf,
+        /// the db name
+        name: String,
         /// the db command
         #[command(subcommand)]
         command: DbCommand,
@@ -348,9 +348,8 @@ async fn main() -> anyhow::Result<()> {
     }
     let nats = connect(nats).await.ok();
     match command {
-        Action::Db { path, command } => {
-            let id = path.file_name().unwrap().display().to_string();
-            let db = eos::Db::new(&id)?;
+        Action::Db { name, command } => {
+            let db = eos::Db::new(&name);
             match command {
                 DbCommand::Store { key, value } => {
                     db.store(&key, serde_json::to_value(value)?)?;

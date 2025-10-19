@@ -80,23 +80,23 @@ async fn main() -> anyhow::Result<()> {
         })
         .build()?;
     }
-    let db = Db::new(&id)?;
     {
-        let db = db.clone();
-        m.function("store", move |key: &str, value: rune::Value| {
-            db.store(key, value)
+        m.function("store", move |name: &str, key: &str, value: rune::Value| {
+            Db::new(name).store(key, value)
         })
         .build()?;
     }
     {
-        let db = db.clone();
-        m.function("load", move |key: &str| db.load::<rune::Value>(key))
-            .build()?;
+        m.function("load", move |name: &str, key: &str| {
+            Db::new(name).load::<rune::Value>(key)
+        })
+        .build()?;
     }
     {
-        let db = db.clone();
-        m.function("delete", move |key: &str| db.delete(key))
-            .build()?;
+        m.function("delete", move |name: &str, key: &str| {
+            Db::new(name).delete(key)
+        })
+        .build()?;
     }
     {
         m.function("plot", |value: &str| teleplot(value)).build()?;

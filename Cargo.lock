@@ -2040,7 +2040,6 @@ dependencies = [
  "nix",
  "notify",
  "notify-debouncer-full",
- "redb",
  "serde",
  "serde_json",
  "signal-hook",
