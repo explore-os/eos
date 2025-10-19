@@ -38,6 +38,7 @@ impl Dirs {
         } = Self::get();
 
         std::fs::create_dir_all(&actor_dir)?;
+        std::fs::create_dir_all(&storage_dir)?;
         std::fs::create_dir_all(&spawn_dir)?;
         std::fs::create_dir_all(&send_dir)?;
         Ok(Self {
