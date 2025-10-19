@@ -74,7 +74,7 @@ enum Action {
     /// kills an actor
     Kill {
         /// the path to the actor that should be killed
-        path: PathBuf,
+        paths: Vec<PathBuf>,
     },
     /// changes the tick rate of the system
     Tick {
@@ -463,12 +463,14 @@ async fn main() -> anyhow::Result<()> {
                 })?,
             )?;
         }
-        Action::Kill { path } => {
-            if !path.join(PID_FILE).exists() {
-                bail!("There is no actor running in the specified directory!");
+        Action::Kill { paths } => {
+            for path in paths {
+                if !path.join(PID_FILE).exists() {
+                    bail!("There is no actor running in the specified directory!");
+                }
+                let actor_pid = std::fs::read_to_string(path.join(PID_FILE))?;
+                kill(actor_pid.parse()?)?;
             }
-            let actor_pid = std::fs::read_to_string(path.join(PID_FILE))?;
-            kill(actor_pid.parse()?)?;
             update(nats).await?;
         }
         Action::Pause { path } => {
