@@ -1,4 +1,7 @@
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    process::Command,
+};
 
 use anyhow::bail;
 use async_nats::{Client, connect};
@@ -70,6 +73,11 @@ enum Action {
         path: PathBuf,
         /// a string containing the json representation of a message
         msg: String,
+    },
+    /// helper to edit actor files
+    Edit {
+        /// the path to the actor which state you want to edit
+        path: PathBuf,
     },
     /// kills an actor
     Kill {
@@ -491,6 +499,9 @@ async fn main() -> anyhow::Result<()> {
             }
             TickCommand::Reset => std::fs::remove_file(root.join(TICK_FILE))?,
         },
+        Action::Edit { path } => {
+            _ = Command::new("code").arg(path).spawn()?;
+        }
     }
     Ok(())
 }
