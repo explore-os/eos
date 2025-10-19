@@ -1,6 +1,8 @@
+use std::net::UdpSocket;
 use std::path::PathBuf;
 
-use serde::{Deserialize, Serialize};
+use redb::{CacheStats, Database, ReadableDatabase, TableDefinition};
+use serde::{Deserialize, Serialize, de::DeserializeOwned};
 
 pub const ROOT: &str = "/explore";
 pub const PID_FILE: &str = ".pid";
@@ -14,11 +16,15 @@ pub const PAUSE_FILE: &str = "paused";
 pub const STATE_FILE: &str = "state.json";
 pub const EOS_CTL: &str = "eos.ctl";
 
+const TELEPLOT_ADDR: &str = "teleplot:47269";
+const TABLE: TableDefinition<&str, String> = TableDefinition::new("DATA");
+
 pub struct Dirs {
     pub root_dir: PathBuf,
     pub spawn_dir: PathBuf,
     pub actor_dir: PathBuf,
     pub send_dir: PathBuf,
+    pub storage_dir: PathBuf,
 }
 
 impl Dirs {
@@ -28,6 +34,7 @@ impl Dirs {
             actor_dir,
             spawn_dir,
             send_dir,
+            storage_dir,
         } = Self::get();
 
         std::fs::create_dir_all(&actor_dir)?;
@@ -38,15 +45,19 @@ impl Dirs {
             actor_dir,
             spawn_dir,
             send_dir,
+            storage_dir,
         })
     }
     pub fn get() -> Self {
         let root = PathBuf::from(ROOT);
+        let actor_dir = root.join(ACTOR_DIR);
+        let storage_dir = actor_dir.join("storage");
         Self {
             root_dir: root.clone(),
             spawn_dir: root.join(SPAWN_DIR),
-            actor_dir: root.join(ACTOR_DIR),
+            actor_dir,
             send_dir: root.join(SEND_DIR),
+            storage_dir,
         }
     }
 }
@@ -57,7 +68,6 @@ pub enum Response {
     Failed { err: String },
     Spawned { id: String },
     Actors { actors: Vec<String> },
-    Db { response: DbResponse },
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -71,7 +81,6 @@ pub enum Command {
     Spawn { props: Props },
     List,
     Update,
-    Db { owner: String, action: DbAction },
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
@@ -85,30 +94,78 @@ pub struct Props {
 }
 
 #[derive(Debug, Serialize, Deserialize)]
-pub enum DbAction {
-    Store {
-        key: String,
-        value: serde_json::Value,
-    },
-    Delete {
-        key: String,
-    },
-    Load {
-        key: String,
-    },
-    Exists {
-        key: String,
-    },
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub struct DbResponse {
-    pub success: bool,
-    pub data: Option<serde_json::Value>,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
 pub struct Message {
     pub sender: Option<String>,
     pub payload: serde_json::Value,
+}
+
+pub fn teleplot(value: &str) -> anyhow::Result<()> {
+    let sock = UdpSocket::bind("127.0.0.1:0")?;
+    sock.send_to(value.as_bytes(), TELEPLOT_ADDR)?;
+    Ok(())
+}
+
+#[derive(Clone)]
+pub struct Db {
+    id: String,
+}
+
+impl Db {
+    pub fn new(id: &str) -> anyhow::Result<Self> {
+        Ok(Self { id: id.to_string() })
+    }
+
+    fn db(&self) -> anyhow::Result<Database> {
+        let Dirs { storage_dir, .. } = Dirs::get();
+        Ok(Database::create(storage_dir.join(&self.id))?)
+    }
+
+    pub fn stats(&self) -> anyhow::Result<CacheStats> {
+        Ok(self.db()?.cache_stats())
+    }
+
+    pub fn compact(&self) -> anyhow::Result<bool> {
+        Ok(self.db()?.compact()?)
+    }
+
+    pub fn store<T: Serialize + DeserializeOwned>(
+        &self,
+        key: &str,
+        value: T,
+    ) -> anyhow::Result<()> {
+        let write_txn = self.db()?.begin_write()?;
+        {
+            let mut table = write_txn.open_table(TABLE)?;
+            table.insert(key, serde_json::to_string(&value)?)?;
+        }
+        write_txn.commit()?;
+        Ok(())
+    }
+
+    pub fn delete(&self, key: &str) -> anyhow::Result<()> {
+        let write_txn = self.db()?.begin_write()?;
+        {
+            let mut table = write_txn.open_table(TABLE)?;
+            table.remove(key)?;
+        }
+        write_txn.commit()?;
+        Ok(())
+    }
+
+    pub fn load<T: DeserializeOwned>(&self, key: &str) -> anyhow::Result<Option<T>> {
+        let read_txn = self.db()?.begin_read()?;
+        let table = read_txn.open_table(TABLE)?;
+        let result = if let Some(value) = table.get(key)? {
+            Some(serde_json::from_str(&value.value())?)
+        } else {
+            None
+        };
+        Ok(result)
+    }
+
+    pub fn exists(&self, key: &str) -> anyhow::Result<bool> {
+        let read_txn = self.db()?.begin_read()?;
+        let table = read_txn.open_table(TABLE)?;
+        Ok(table.get(key)?.is_some())
+    }
 }

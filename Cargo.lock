@@ -500,6 +500,7 @@ dependencies = [
  "futures-util",
  "nanoid",
  "nix",
+ "redb",
  "serde",
  "serde_json",
  "shellexpand",

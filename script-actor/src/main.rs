@@ -2,7 +2,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use clap::Parser;
-use eos::Message;
+use eos::{Db, Message, teleplot};
 use nanoid::nanoid;
 use rune::runtime::Object;
 use rune::termcolor::{ColorChoice, StandardStream};
@@ -80,7 +80,32 @@ async fn main() -> anyhow::Result<()> {
         })
         .build()?;
     }
-    let m = m;
+    let db = Db::new(&id)?;
+    {
+        let db = db.clone();
+        m.function("store", move |key: &str, value: rune::Value| {
+            db.store(key, value)
+        })
+        .build()?;
+    }
+    {
+        let db = db.clone();
+        m.function("load", move |key: &str| db.load::<rune::Value>(key))
+            .build()?;
+    }
+    {
+        let db = db.clone();
+        m.function("delete", move |key: &str| db.delete(key))
+            .build()?;
+    }
+    {
+        let db = db.clone();
+        m.function("exists", move |key: &str| db.exists(key))
+            .build()?;
+    }
+    {
+        m.function("plot", |value: &str| teleplot(value)).build()?;
+    }
     tokio::fs::write(
         &state_file,
         serde_json::to_string_pretty(&init(&m, &script).await?)?,

@@ -7,8 +7,8 @@ use bytes::Bytes;
 use clap::Command;
 use clap::{Parser, Subcommand};
 use eos::{
-    DbAction, DbResponse, Dirs, EOS_CTL, Message, PAUSE_FILE, PID_FILE, Props, ROOT, Request,
-    Response, SEND_DIR, SPAWN_DIR, STATE_FILE, TICK_FILE,
+    Dirs, EOS_CTL, Message, PAUSE_FILE, PID_FILE, Props, ROOT, Request, Response, SEND_DIR,
+    SPAWN_DIR, STATE_FILE, TICK_FILE,
 };
 use futures_util::StreamExt;
 use nanoid::nanoid;
@@ -94,6 +94,8 @@ enum Action {
         #[command(subcommand)]
         command: DbCommand,
     },
+    /// send data to a teleplot instance
+    Teleplot { value: String },
 }
 
 #[derive(Subcommand)]
@@ -126,6 +128,10 @@ enum DbCommand {
         /// the key to check
         key: String,
     },
+    /// compact the db for an actor
+    Compact,
+    /// print cache stats for the db of an actor
+    Stats,
 }
 
 #[derive(Subcommand)]
@@ -324,47 +330,6 @@ async fn list(nats: Option<Client>) -> anyhow::Result<()> {
     }
 }
 
-async fn db_action(nats: Option<Client>, owner: String, action: DbAction) -> anyhow::Result<()> {
-    match nats {
-        Some(client) => {
-            let session = nanoid!();
-
-            let mut sub = client.subscribe(format!("eos.response.{session}")).await?;
-
-            client
-                .publish(
-                    EOS_CTL,
-                    Bytes::from(serde_json::to_vec(&Request {
-                        session_id: session.clone(),
-                        cmd: eos::Command::Db { owner, action },
-                    })?),
-                )
-                .await?;
-
-            while let Some(msg) = sub.next().await {
-                if let Ok(response) = serde_json::from_slice::<Response>(&msg.payload) {
-                    if let Response::Db {
-                        response: DbResponse { success, data },
-                    } = response
-                    {
-                        if success {
-                            println!("DB action was executed successfully!");
-                            if let Some(data) = data {
-                                println!("Result: {}", serde_json::to_string_pretty(&data)?);
-                            }
-                        } else {
-                            println!("DB action failed!");
-                        }
-                    }
-                    break;
-                }
-            }
-        }
-        None => eprintln!("DB actions are only available through nats"),
-    }
-    Ok(())
-}
-
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     #[cfg(feature = "_setup")]
@@ -383,43 +348,38 @@ async fn main() -> anyhow::Result<()> {
     }
     let nats = connect(nats).await.ok();
     match command {
-        Action::Db { path, command } => match command {
-            DbCommand::Store { key, value } => {
-                db_action(
-                    nats,
-                    path.file_name().unwrap().display().to_string(),
-                    DbAction::Store {
-                        key,
-                        value: serde_json::to_value(&value)?,
-                    },
-                )
-                .await?;
+        Action::Db { path, command } => {
+            let id = path.file_name().unwrap().display().to_string();
+            let db = eos::Db::new(&id)?;
+            match command {
+                DbCommand::Store { key, value } => {
+                    db.store(&key, serde_json::to_value(value)?)?;
+                }
+                DbCommand::Delete { key } => {
+                    db.delete(&key)?;
+                }
+                DbCommand::Load { key } => {
+                    let value = db.load::<serde_json::Value>(&key)?;
+                    match value {
+                        Some(value) => println!("{}", serde_json::to_string_pretty(&value)?),
+                        None => bail!("Key not found"),
+                    }
+                }
+                DbCommand::Exists { key } => {
+                    println!("{}", serde_json::to_string_pretty(&db.exists(&key)?)?);
+                }
+                DbCommand::Compact => {
+                    if db.compact()? {
+                        println!("Database compacted");
+                    } else {
+                        println!("No need to compact database");
+                    }
+                }
+                DbCommand::Stats => {
+                    println!("{:#?}", db.stats()?);
+                }
             }
-            DbCommand::Delete { key } => {
-                db_action(
-                    nats,
-                    path.file_name().unwrap().display().to_string(),
-                    DbAction::Delete { key },
-                )
-                .await?;
-            }
-            DbCommand::Load { key } => {
-                db_action(
-                    nats,
-                    path.file_name().unwrap().display().to_string(),
-                    DbAction::Load { key },
-                )
-                .await?;
-            }
-            DbCommand::Exists { key } => {
-                db_action(
-                    nats,
-                    path.file_name().unwrap().display().to_string(),
-                    DbAction::Exists { key },
-                )
-                .await?;
-            }
-        },
+        }
         Action::Update => update(nats).await?,
         Action::Spawn { id, command } => {
             let props = match command {
@@ -504,6 +464,9 @@ async fn main() -> anyhow::Result<()> {
                 .arg("-r")
                 .arg(path.join(STATE_FILE))
                 .spawn()?;
+        }
+        Action::Teleplot { value } => {
+            eos::teleplot(&value)?;
         }
     }
     Ok(())
