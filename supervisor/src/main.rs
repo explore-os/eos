@@ -8,7 +8,7 @@ use clap::Parser;
 use env_logger::Env;
 use eos::{
     ACTOR_DIR, DbAction, DbResponse, Dirs, MAILBOX_DIR, MAILBOX_HEAD, Message, PAUSE_FILE,
-    PID_FILE, Props, ROOT, Request, Response, TICK_FILE,
+    PID_FILE, Props, ROOT, Request, Response, STATE_FILE, TICK_FILE,
 };
 use faccess::PathExt;
 use futures_util::stream::StreamExt;
@@ -65,7 +65,7 @@ async fn spawn_actor(
     let message_dir = actor_dir.join(MAILBOX_DIR);
     fs::create_dir_all(&message_dir).await?;
     let message_file = message_dir.join(MAILBOX_HEAD);
-    let state_file = actor_dir.join("state.json");
+    let state_file = actor_dir.join(STATE_FILE);
     let process = Command::new(&props.path)
         .arg(&id)
         .arg(state_file)

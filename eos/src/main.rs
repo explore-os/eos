@@ -8,7 +8,7 @@ use clap::Command;
 use clap::{Parser, Subcommand};
 use eos::{
     DbAction, DbResponse, Dirs, EOS_CTL, Message, PAUSE_FILE, PID_FILE, Props, ROOT, Request,
-    Response, SEND_DIR, SPAWN_DIR, TICK_FILE,
+    Response, SEND_DIR, SPAWN_DIR, STATE_FILE, TICK_FILE,
 };
 use futures_util::StreamExt;
 use nanoid::nanoid;
@@ -497,9 +497,12 @@ async fn main() -> anyhow::Result<()> {
             TickCommand::Reset => std::fs::remove_file(root.join(TICK_FILE))?,
         },
         Action::Edit { path } => {
+            if !path.join(PID_FILE).exists() {
+                bail!("There is no actor running in the specified directory!");
+            }
             _ = std::process::Command::new("code")
                 .arg("-r")
-                .arg(path)
+                .arg(path.join(STATE_FILE))
                 .spawn()?;
         }
     }

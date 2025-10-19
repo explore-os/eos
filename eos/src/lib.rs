@@ -11,6 +11,7 @@ pub const ACTOR_DIR: &str = "actors";
 pub const SPAWN_DIR: &str = "spawn";
 pub const SEND_DIR: &str = "send";
 pub const PAUSE_FILE: &str = "paused";
+pub const STATE_FILE: &str = "state.json";
 pub const EOS_CTL: &str = "eos.ctl";
 
 pub struct Dirs {
