@@ -497,7 +497,10 @@ async fn main() -> anyhow::Result<()> {
             TickCommand::Reset => std::fs::remove_file(root.join(TICK_FILE))?,
         },
         Action::Edit { path } => {
-            _ = std::process::Command::new("code").arg(path).spawn()?;
+            _ = std::process::Command::new("code")
+                .arg("-r")
+                .arg(path)
+                .spawn()?;
         }
     }
     Ok(())
