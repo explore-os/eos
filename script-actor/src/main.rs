@@ -19,13 +19,13 @@ struct Args {
     script: PathBuf,
 }
 
-fn make_vm(m: &Module, script: impl AsRef<Path>) -> anyhow::Result<rune::Vm> {
+async fn make_vm(m: &Module, script: impl AsRef<Path>) -> anyhow::Result<rune::Vm> {
     let mut context = Context::with_default_modules()?;
     context.install(m)?;
 
     let runtime = Arc::new(context.runtime()?);
     let mut sources = Sources::new();
-    sources.insert(Source::from_path(script)?)?;
+    sources.insert(Source::memory(sanitized_script(script).await?)?)?;
 
     let mut diagnostics = Diagnostics::new();
 
@@ -43,8 +43,8 @@ fn make_vm(m: &Module, script: impl AsRef<Path>) -> anyhow::Result<rune::Vm> {
     Ok(Vm::new(runtime, Arc::new(unit)))
 }
 
-fn init(m: &Module, script: impl AsRef<Path>) -> anyhow::Result<rune::Value> {
-    let vm = make_vm(m, script)?;
+async fn init(m: &Module, script: impl AsRef<Path>) -> anyhow::Result<rune::Value> {
+    let vm = make_vm(m, script).await?;
     if let Ok(init) = vm.lookup_function(["init"]) {
         Ok(init.call(()).into_result()?)
     } else {
@@ -54,6 +54,15 @@ fn init(m: &Module, script: impl AsRef<Path>) -> anyhow::Result<rune::Value> {
 
 fn empty_state() -> anyhow::Result<rune::Value> {
     Ok(rune::Value::new(Object::new())?)
+}
+
+async fn sanitized_script(script: impl AsRef<Path>) -> anyhow::Result<String> {
+    let script = tokio::fs::read_to_string(script.as_ref()).await?;
+    if script.starts_with("#!") {
+        Ok(script.lines().skip(1).collect::<String>())
+    } else {
+        Ok(script)
+    }
 }
 
 #[tokio::main]
@@ -83,7 +92,7 @@ async fn main() -> anyhow::Result<()> {
     let m = m;
     tokio::fs::write(
         &state_file,
-        serde_json::to_string_pretty(&init(&m, &script)?)?,
+        serde_json::to_string_pretty(&init(&m, &script).await?)?,
     )
     .await?;
     let mut message_signal = signal(SignalKind::user_defined1())?;
@@ -100,7 +109,7 @@ async fn main() -> anyhow::Result<()> {
             empty_state()?
         };
 
-        let mut vm = make_vm(&m, &script)?;
+        let mut vm = make_vm(&m, &script).await?;
 
         let output = vm.call(["handle"], (state, message))?;
         tokio::fs::write(&state_file, serde_json::to_string_pretty(&output)?).await?;
