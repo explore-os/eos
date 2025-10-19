@@ -16,7 +16,7 @@ pub const PAUSE_FILE: &str = "paused";
 pub const STATE_FILE: &str = "state.json";
 pub const EOS_CTL: &str = "eos.ctl";
 
-const TELEPLOT_ADDR: &str = "teleplot:47269";
+const TELEPLOT_ADDR: &str = "localhost:47269";
 const TABLE: TableDefinition<&str, String> = TableDefinition::new("DATA");
 
 pub struct Dirs {
