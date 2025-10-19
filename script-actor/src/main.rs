@@ -25,7 +25,7 @@ async fn make_vm(m: &Module, script: impl AsRef<Path>) -> anyhow::Result<rune::V
 
     let runtime = Arc::new(context.runtime()?);
     let mut sources = Sources::new();
-    sources.insert(Source::memory(sanitized_script(script).await?)?)?;
+    sources.insert(Source::from_path(script)?)?;
 
     let mut diagnostics = Diagnostics::new();
 
@@ -54,15 +54,6 @@ async fn init(m: &Module, script: impl AsRef<Path>) -> anyhow::Result<rune::Valu
 
 fn empty_state() -> anyhow::Result<rune::Value> {
     Ok(rune::Value::new(Object::new())?)
-}
-
-async fn sanitized_script(script: impl AsRef<Path>) -> anyhow::Result<String> {
-    let script = tokio::fs::read_to_string(script.as_ref()).await?;
-    if script.starts_with("#!") {
-        Ok(script.lines().skip(1).collect::<String>())
-    } else {
-        Ok(script)
-    }
 }
 
 #[tokio::main]
