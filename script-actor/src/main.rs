@@ -99,11 +99,6 @@ async fn main() -> anyhow::Result<()> {
             .build()?;
     }
     {
-        let db = db.clone();
-        m.function("exists", move |key: &str| db.exists(key))
-            .build()?;
-    }
-    {
         m.function("plot", |value: &str| teleplot(value)).build()?;
     }
     tokio::fs::write(
