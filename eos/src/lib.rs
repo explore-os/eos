@@ -1,4 +1,4 @@
-use std::net::UdpSocket;
+use std::net::{ToSocketAddrs, UdpSocket};
 use std::path::PathBuf;
 
 use redb::{CacheStats, Database, ReadableDatabase, TableDefinition};
@@ -17,7 +17,7 @@ pub const PAUSE_FILE: &str = "paused";
 pub const STATE_FILE: &str = "state.json";
 pub const EOS_CTL: &str = "eos.ctl";
 
-const TELEPLOT_ADDR: &str = "127.0.0.1:47269";
+const TELEPLOT_ADDR: &str = "teleplot:47269";
 const TABLE: TableDefinition<&str, String> = TableDefinition::new("DATA");
 
 pub struct Dirs {
@@ -101,7 +101,13 @@ pub struct Message {
 
 pub fn teleplot(value: &str) -> anyhow::Result<()> {
     let sock = UdpSocket::bind("127.0.0.1:0")?;
-    sock.send_to(value.as_bytes(), TELEPLOT_ADDR)?;
+    let mut addr_iter = TELEPLOT_ADDR.to_socket_addrs()?;
+    sock.send_to(
+        value.as_bytes(),
+        addr_iter
+            .next()
+            .ok_or_else(|| anyhow::anyhow!("Failed to resolve teleplot host."))?,
+    )?;
     Ok(())
 }
 
