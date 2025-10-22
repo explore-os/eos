@@ -8,15 +8,13 @@ use clap::Parser;
 use env_logger::Env;
 use eos::{
     ACTOR_DIR, Dirs, MAILBOX_DIR, MAILBOX_HEAD, PAUSE_FILE, PID_FILE, Props, ROOT, Request,
-    Response, STATE_FILE, TICK_FILE,
+    Response, STATE_FILE, TICK_FILE, teleplot,
 };
 use faccess::PathExt;
 use futures_util::stream::StreamExt;
 use nanoid::nanoid;
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::{fs, process::Command, spawn};
-
-mod proxy;
 
 const DEFAULT_TICK: u64 = 2000;
 
@@ -199,6 +197,7 @@ async fn kill_actors(actor_dir: impl AsRef<Path>) -> anyhow::Result<()> {
 
 async fn check_alive(actor_dir: impl AsRef<Path>) -> anyhow::Result<()> {
     let mut entries = fs::read_dir(&actor_dir).await?;
+    let mut count = 0;
     while let Some(entry) = entries.next_entry().await? {
         if entry.path().is_file() {
             continue;
@@ -207,8 +206,11 @@ async fn check_alive(actor_dir: impl AsRef<Path>) -> anyhow::Result<()> {
         let pid = pid_string.parse::<usize>()?;
         if !fs::try_exists(Path::new("/proc").join(format!("{pid}"))).await? {
             fs::remove_dir_all(entry.path()).await?;
+            continue;
         }
+        count += 1;
     }
+    _ = teleplot(&format!("system.actor.count:{count}"));
     Ok(())
 }
 
@@ -240,6 +242,7 @@ async fn check_queue(
             let target_dir = actor_dir.join(target).join(MAILBOX_DIR);
             if fs::try_exists(&target_dir).await? {
                 fs::rename(&msg_path, &target_dir.join(id)).await?;
+                _ = teleplot("system.msg.sent:1");
             } else {
                 fs::remove_file(msg_path).await?;
             }
@@ -299,8 +302,6 @@ async fn main() -> anyhow::Result<()> {
     let pid = std::process::id();
     log::info!("Running as PID: {pid}",);
     fs::write(root_dir.join(PID_FILE), format!("{pid}")).await?;
-
-    spawn(proxy::proxy());
 
     log::info!("supervisor started");
 
