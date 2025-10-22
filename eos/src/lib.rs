@@ -1,4 +1,4 @@
-use std::net::{ToSocketAddrs, UdpSocket};
+use std::net::UdpSocket;
 use std::path::PathBuf;
 
 use redb::{CacheStats, Database, ReadableDatabase, TableDefinition};
