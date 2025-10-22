@@ -102,12 +102,11 @@ pub struct Message {
 pub fn teleplot(value: &str) -> anyhow::Result<()> {
     let sock = UdpSocket::bind("127.0.0.1:0")?;
     let mut addr_iter = TELEPLOT_ADDR.to_socket_addrs()?;
-    sock.send_to(
-        value.as_bytes(),
-        addr_iter
-            .next()
-            .ok_or_else(|| anyhow::anyhow!("Failed to resolve teleplot host."))?,
-    )?;
+    let addr = addr_iter
+        .next()
+        .ok_or_else(|| anyhow::anyhow!("Failed to resolve teleplot host."))?;
+
+    sock.send_to(value.as_bytes(), addr)?;
     Ok(())
 }
 

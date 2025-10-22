@@ -16,6 +16,8 @@ use nanoid::nanoid;
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::{fs, process::Command, spawn};
 
+mod proxy;
+
 const DEFAULT_TICK: u64 = 2000;
 
 #[derive(Parser)]
@@ -297,6 +299,8 @@ async fn main() -> anyhow::Result<()> {
     let pid = std::process::id();
     log::info!("Running as PID: {pid}",);
     fs::write(root_dir.join(PID_FILE), format!("{pid}")).await?;
+
+    spawn(proxy::proxy());
 
     log::info!("supervisor started");
 
