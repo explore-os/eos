@@ -17,7 +17,7 @@ pub const PAUSE_FILE: &str = "paused";
 pub const STATE_FILE: &str = "state.json";
 pub const EOS_CTL: &str = "eos.ctl";
 
-const TELEPLOT_ADDR: &str = "10.5.0.10:47269";
+const TELEPLOT_ADDR: &str = "127.0.0.1:47269";
 const TABLE: TableDefinition<&str, String> = TableDefinition::new("DATA");
 
 pub struct Dirs {
@@ -100,7 +100,7 @@ pub struct Message {
 }
 
 pub fn teleplot(value: &str) -> anyhow::Result<()> {
-    let sock = UdpSocket::bind("127.0.0.1:0")?;
+    let sock = UdpSocket::bind("0.0.0.0:0")?;
     sock.send_to(value.as_bytes(), TELEPLOT_ADDR)?;
     Ok(())
 }
