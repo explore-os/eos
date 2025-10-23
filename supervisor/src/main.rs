@@ -198,7 +198,7 @@ async fn kill_actors(actor_dir: impl AsRef<Path>) -> anyhow::Result<()> {
     Ok(())
 }
 
-async fn check_alive(actor_dir: impl AsRef<Path>) -> anyhow::Result<()> {
+async fn check_alive(actor_dir: impl AsRef<Path>) -> anyhow::Result<usize> {
     let mut entries = fs::read_dir(&actor_dir).await?;
     let mut count = 0;
     while let Some(entry) = entries.next_entry().await? {
@@ -213,8 +213,7 @@ async fn check_alive(actor_dir: impl AsRef<Path>) -> anyhow::Result<()> {
         }
         count += 1;
     }
-    _ = teleplot(&format!("system.actor.count:{count}"));
-    Ok(())
+    Ok(count)
 }
 
 async fn check_queue(
@@ -361,6 +360,7 @@ async fn main() -> anyhow::Result<()> {
         let actor_dir = actor_dir.clone();
         let root_dir = root_dir.clone();
         spawn(async move {
+            let mut old_count = 0;
             loop {
                 tokio::time::sleep(Duration::from_secs(1)).await;
                 if fs::try_exists(root_dir.join(PAUSE_FILE))
@@ -369,8 +369,14 @@ async fn main() -> anyhow::Result<()> {
                 {
                     continue;
                 }
-                if let Err(e) = check_alive(&actor_dir).await {
-                    log::error!("{e}");
+                let mut new_count = old_count;
+                match check_alive(&actor_dir).await {
+                    Ok(count) => new_count = count,
+                    Err(e) => log::error!("{e}"),
+                }
+                if old_count != new_count {
+                    old_count = new_count;
+                    _ = teleplot(&format!("system.actor.count:{new_count}"));
                 }
             }
         });
