@@ -13,6 +13,7 @@ use eos::{
 use faccess::PathExt;
 use futures_util::stream::StreamExt;
 use nanoid::nanoid;
+use tokio::fs::try_exists;
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::{fs, process::Command, spawn};
 
@@ -88,6 +89,7 @@ async fn check_props(
 ) -> anyhow::Result<()> {
     log::info!("Checking spawn dir: {}", props_dir.as_ref().display());
     let mut entries = fs::read_dir(&props_dir).await?;
+    let mut count = 0;
     while let Some(entry) = entries.next_entry().await? {
         if entry.path().is_dir() {
             continue;
@@ -98,8 +100,10 @@ async fn check_props(
         log::info!("Spawning from file: {}", props_file.display());
         let props: Props = serde_json::from_str::<Props>(&content)?;
         spawn_actor(&actor_dir, &send_dir, props).await?;
+        count += 1;
         fs::remove_file(props_file).await?;
     }
+    _ = teleplot(&format!("system.actor.spawned:{count}"));
     Ok(())
 }
 
@@ -229,6 +233,7 @@ async fn check_queue(
     }
     let actor_dir = actor_dir.as_ref();
     let now = std::time::SystemTime::now();
+    let mut count = 0;
     for (msg_path, t) in messages {
         if now.duration_since(t)?.as_millis() < tick as u128 {
             continue;
@@ -241,13 +246,18 @@ async fn check_queue(
         {
             let target_dir = actor_dir.join(target).join(MAILBOX_DIR);
             if fs::try_exists(&target_dir).await? {
-                fs::rename(&msg_path, &target_dir.join(id)).await?;
-                _ = teleplot("system.msg.sent:1");
+                if try_exists(target_dir.join(MAILBOX_HEAD)).await? {
+                    fs::rename(&msg_path, &target_dir.join(id)).await?;
+                } else {
+                    fs::rename(&msg_path, &target_dir.join(MAILBOX_HEAD)).await?;
+                }
+                count += 1;
             } else {
                 fs::remove_file(msg_path).await?;
             }
         }
     }
+    _ = teleplot(&format!("system.message.sent:{count}"));
     Ok(())
 }
 
@@ -386,7 +396,10 @@ async fn main() -> anyhow::Result<()> {
                                     match spawn_actor(root_dir.join(ACTOR_DIR), &send_dir, props)
                                         .await
                                     {
-                                        Ok(id) => Response::Spawned { id },
+                                        Ok(id) => {
+                                            _ = teleplot("system.actor.spawned:1");
+                                            Response::Spawned { id }
+                                        }
                                         Err(err) => Response::Failed {
                                             err: err.to_string(),
                                         },
