@@ -202,10 +202,7 @@ async fn update_unix() -> anyhow::Result<()> {
     let Dirs { root_dir, .. } = Dirs::get();
     let pid_file = root_dir.join(PID_FILE);
     let pid = fs::read_to_string(pid_file).await?;
-    Ok(nix::sys::signal::kill(
-        nix::unistd::Pid::from_raw(pid.parse()?),
-        nix::sys::signal::Signal::SIGUSR2,
-    )?)
+    notify(pid.parse()?)
 }
 
 async fn update(nats: Option<Client>) -> anyhow::Result<()> {
@@ -255,7 +252,6 @@ async fn spawn_unix(props: Props) -> anyhow::Result<()> {
         root_dir.join(SPAWN_DIR).join(nanoid!()),
         serde_json::to_string_pretty(&props)?,
     )?;
-    notify(get_pid(root_dir).await?)?;
     Ok(())
 }
 

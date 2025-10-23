@@ -13,7 +13,6 @@ use eos::{
 use faccess::PathExt;
 use futures_util::stream::StreamExt;
 use nanoid::nanoid;
-use tokio::fs::try_exists;
 use tokio::signal::unix::{SignalKind, signal};
 use tokio::{fs, process::Command, spawn};
 
@@ -246,11 +245,7 @@ async fn check_queue(
         {
             let target_dir = actor_dir.join(target).join(MAILBOX_DIR);
             if fs::try_exists(&target_dir).await? {
-                if try_exists(target_dir.join(MAILBOX_HEAD)).await? {
-                    fs::rename(&msg_path, &target_dir.join(id)).await?;
-                } else {
-                    fs::rename(&msg_path, &target_dir.join(MAILBOX_HEAD)).await?;
-                }
+                fs::rename(&msg_path, &target_dir.join(id)).await?;
                 count += 1;
             } else {
                 fs::remove_file(msg_path).await?;
@@ -315,8 +310,6 @@ async fn main() -> anyhow::Result<()> {
 
     log::info!("supervisor started");
 
-    let mut spawn_signal = signal(SignalKind::user_defined1())?;
-
     {
         let root_dir = root_dir.clone();
         let send_dir = send_dir.clone();
@@ -324,7 +317,8 @@ async fn main() -> anyhow::Result<()> {
         let actor_dir = actor_dir.clone();
         spawn(async move {
             loop {
-                spawn_signal.recv().await;
+                let tick = tick().await.unwrap();
+                tokio::time::sleep(Duration::from_millis(tick)).await;
                 if fs::try_exists(root_dir.join(PAUSE_FILE))
                     .await
                     .expect("WHY YOU NO READ FILE?")
