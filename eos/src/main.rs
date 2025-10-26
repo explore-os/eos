@@ -146,14 +146,6 @@ enum TickCommand {
     Reset,
 }
 
-async fn get_pid(path: impl AsRef<Path>) -> anyhow::Result<i32> {
-    let pid_file = path.as_ref().join(PID_FILE);
-    if !fs::try_exists(&pid_file).await? {
-        bail!("The actor system isn't running!");
-    }
-    Ok(fs::read_to_string(pid_file).await?.parse()?)
-}
-
 fn kill(pid: i32) -> anyhow::Result<()> {
     Ok(nix::sys::signal::kill(
         nix::unistd::Pid::from_raw(pid),
