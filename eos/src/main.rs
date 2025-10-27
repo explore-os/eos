@@ -13,6 +13,7 @@ use clap::{Parser, Subcommand};
 use common::{EOS_CTL, Message, Props, Request, Response};
 use futures_util::StreamExt;
 use nanoid::nanoid;
+use stringlit::s;
 
 #[cfg(feature = "_setup")]
 use clap_complete::{aot::Fish, generate_to};
@@ -61,6 +62,11 @@ enum Action {
         #[arg(short, long)]
         id: Option<String>,
         script: PathBuf,
+    },
+    /// Kill an actor
+    Kill {
+        /// the directory for the actor to kill
+        path: PathBuf,
     },
     /// list all the running actors
     List,
@@ -336,6 +342,15 @@ async fn main() -> anyhow::Result<()> {
             };
             send(client().await, common::Command::Send(msg)).await?;
         }
+        Action::Kill { path } => {
+            send(
+                client().await,
+                common::Command::Kill {
+                    id: path.file_name().unwrap().display().to_string(),
+                },
+            )
+            .await?;
+        }
         Action::Pause { path } => {
             send(
                 client().await,
@@ -387,6 +402,26 @@ async fn main() -> anyhow::Result<()> {
                                 match serde_json::from_slice::<common::Request>(&message.payload) {
                                     Ok(Request { session_id, cmd }) => {
                                         let response = match cmd {
+                                            common::Command::Rename { old, new } => {
+                                                let mut sys = sys.write().await;
+                                                if sys.actors.contains_key(&new) {
+                                                    Response::Failed {
+                                                        err: s!(
+                                                            "Actor with the same id already exists"
+                                                        ),
+                                                    }
+                                                } else {
+                                                    if let Some(actor) = sys.actors.remove(&old) {
+                                                        sys.actors.insert(new, actor);
+                                                    }
+                                                    Response::Done
+                                                }
+                                            }
+                                            common::Command::Kill { id } => {
+                                                let mut sys = sys.write().await;
+                                                sys.actors.remove(&id);
+                                                Response::Done
+                                            }
                                             common::Command::Pause { id } => {
                                                 let mut sys = sys.write().await;
                                                 if let Some(id) = id
