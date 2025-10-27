@@ -2,11 +2,13 @@
 
 use std::{
     collections::{HashMap, VecDeque},
+    io::Write,
     path::{Path, PathBuf},
     sync::Arc,
 };
 
-use crate::common::{Message, MessageKind, Props, teleplot};
+use crate::common::{Message, MessageKind, Props, SYSTEM, teleplot};
+use lazy_static::lazy_static;
 use nanoid::nanoid;
 use rune::{
     BuildError, Context, ContextError, Diagnostics, Module, Source, Sources, ToValue, Value, Vm,
@@ -18,6 +20,7 @@ use rune::{
     to_value,
 };
 use serde_json::Value as JsonValue;
+use std::sync::RwLock;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -82,7 +85,7 @@ impl Actor {
 
     pub async fn run(
         &mut self,
-        spawn_queue: &mut [Props],
+        spawn_queue: &mut Vec<Props>,
         message: Message,
     ) -> EosResult<Option<Message>> {
         let mut vm = make_vm(&self.id, &self.script).await?;
@@ -110,16 +113,14 @@ impl Actor {
 }
 
 pub struct System {
-    pub nats: String,
     pub spawn_queue: Vec<Props>,
     pub actors: HashMap<String, Actor>,
     pub paused: bool,
 }
 
 impl System {
-    pub fn new(nats: &str) -> Self {
+    pub fn new() -> Self {
         System {
-            nats: nats.to_string(),
             spawn_queue: Vec::new(),
             actors: HashMap::new(),
             paused: false,
@@ -192,8 +193,18 @@ fn empty_state() -> EosResult<rune::Value> {
 async fn make_vm(id: &str, script: impl AsRef<Path>) -> EosResult<rune::Vm> {
     let mut m = Module::new();
     {
-        m.function("send", move |to: &str, value: rune::Value| {})
-            .build()?;
+        let id = id.to_owned();
+        m.function("send", move |to: &str, value: rune::Value| {
+            if let Some(this) = SYSTEM.write().unwrap().actors.get_mut(&id) {
+                this.send_queue.push_back(Message {
+                    kind: MessageKind::Notification,
+                    from: Some(id.to_owned()),
+                    to: to.to_owned(),
+                    payload: serde_json::to_value(value).unwrap(),
+                });
+            }
+        })
+        .build()?;
     }
     {
         m.function("plot", |value: &str| teleplot(value)).build()?;

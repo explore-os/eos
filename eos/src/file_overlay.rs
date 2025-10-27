@@ -29,7 +29,6 @@
 //!
 //! # Then browse the filesystem
 //! ls /mnt/eos/actors
-//! cat /mnt/eos/nats
 //! cat /mnt/eos/actors/{id}/state
 //! ```
 //!
@@ -602,10 +601,6 @@ impl FsOverlay {
     async fn get_path_info(&self, sys: &System, path: &str) -> Result<(bool, bool, u64)> {
         match path {
             "/" | "" => Ok((true, true, 0)),
-            "/nats" => {
-                let size = sys.nats.len() as u64;
-                Ok((true, false, size))
-            }
             "/actors" => Ok((true, true, 0)),
             "/spawn_queue" => {
                 let content = self.format_spawn_queue(sys);
@@ -670,7 +665,6 @@ impl FsOverlay {
         log::debug!("read_directory: path={}", path);
         let entries = match path {
             "/" => vec![
-                ("nats".to_string(), false, sys.nats.len() as u64),
                 ("actors".to_string(), true, 0),
                 (
                     "spawn_queue".to_string(),

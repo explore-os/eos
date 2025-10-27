@@ -21,7 +21,7 @@ use rs9p::srv::srv_async_unix;
 use tokio::{spawn, sync::RwLock};
 
 use crate::{
-    common::{DEFAULT_TICK, teleplot},
+    common::{DEFAULT_TICK, NATS_URL, teleplot},
     file_overlay::FsOverlay,
     system::System,
 };
@@ -37,15 +37,6 @@ struct SetupCli {
 }
 #[derive(Parser)]
 struct Cli {
-    #[cfg_attr(
-        feature = "remote",
-        arg(short, long, default_value = "nats://msgbus:4222")
-    )]
-    #[cfg_attr(
-        not(feature = "remote"),
-        arg(short, long, default_value = "nats://localhost:4222")
-    )]
-    nats: String,
     #[command(subcommand)]
     command: Action,
 }
@@ -223,9 +214,9 @@ async fn main() -> anyhow::Result<()> {
         std::process::exit(0);
     }
 
-    let Cli { nats, command } = Cli::parse();
+    let Cli { command } = Cli::parse();
     let root = Path::new(ROOT);
-    let client = connect(&nats).await?;
+    let client = connect(NATS_URL).await?;
     let storage = root.join(STORAGE_DIR);
     match command {
         Action::Db { name, command } => {
@@ -317,13 +308,13 @@ async fn main() -> anyhow::Result<()> {
         }
         Action::Serve => {
             let config = Arc::new(RwLock::new(Config { tick: DEFAULT_TICK }));
-            let sys = Arc::new(RwLock::new(System::new(&nats)));
+            let sys = Arc::new(RwLock::new(System::new()));
 
             {
                 let config = config.clone();
                 let sys = sys.clone();
                 spawn(async move {
-                    if let Ok(client) = async_nats::connect(&nats).await {
+                    if let Ok(client) = async_nats::connect(NATS_URL).await {
                         let mut subscriber = client.subscribe(EOS_CTL).await.unwrap();
                         spawn(async move {
                             while let Some(message) = subscriber.next().await {
@@ -355,7 +346,7 @@ async fn main() -> anyhow::Result<()> {
                                             common::Command::Send(msg) => {
                                                 let mut sys = sys.write().await;
                                                 if let Some(actor) = sys.actors.get_mut(&msg.to) {
-                                                    actor.mailbox.push_back(msg);
+                                                    actor.mailbox.push_back(dbg!(msg));
                                                 }
                                                 Response::Done
                                             }

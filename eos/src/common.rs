@@ -1,9 +1,23 @@
 use std::path::PathBuf;
+use std::sync::RwLock;
 use std::{net::UdpSocket, path::Path};
 
+use lazy_static::lazy_static;
 use redb::{CacheStats, Database, ReadableDatabase, TableDefinition};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use serde_json::Value;
+
+use crate::system::System;
+
+lazy_static! {
+    pub static ref SYSTEM: RwLock<System> = RwLock::new(System::new());
+}
+
+#[cfg(feature = "remote")]
+pub const NATS_URL: &str = "nats://msghub:4222";
+
+#[cfg(not(feature = "remote"))]
+pub const NATS_URL: &str = "nats://localhost:4222";
 
 pub const ROOT: &str = "/explore";
 pub const STORAGE_DIR: &str = "storage";

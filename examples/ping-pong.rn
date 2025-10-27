@@ -1,4 +1,5 @@
 pub fn handle(state, msg) {
+    state.count += 1;
     let sender = msg["sender"];
     let response = msg["payload"];
 
@@ -8,4 +9,8 @@ pub fn handle(state, msg) {
     };
     send(sender, response);
     return state;
+}
+
+pub fn init() {
+    return #{count: 0};
 }
