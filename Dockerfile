@@ -51,9 +51,5 @@ RUN mkdir -p /home/vscode/.config/fish/completions && \
         chown -R vscode:vscode /home/vscode && \
         rm /setup
 
-USER vscode
-RUN nats context add default --server msgbus:4222 --description "default" --select
-WORKDIR /explore
-
 ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["/usr/local/bin/eos", "serve"]
