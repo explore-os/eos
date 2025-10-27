@@ -1000,10 +1000,7 @@ impl FsOverlay {
                                     // Parse and add message to mailbox
                                     if let Ok(messages) = serde_json::from_str(content) {
                                         actor.mailbox = messages;
-                                        log::info!(
-                                            "Added message to mailbox of actor {}",
-                                            actor_id
-                                        );
+                                        log::info!("Updated mailbox of actor {}", actor_id);
                                     }
                                     return Ok(data.len() as u32);
                                 }

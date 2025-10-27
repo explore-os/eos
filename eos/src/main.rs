@@ -23,7 +23,7 @@ use tokio::{spawn, sync::RwLock};
 
 use crate::{
     common::{
-        DEFAULT_TICK, EOS_SOCKET, NATS_URL,
+        DEFAULT_TICK, EOS_SOCKET, EOS_SPY, NATS_URL,
         dirs::{LOGS, STORAGE},
         root, teleplot,
     },
@@ -58,6 +58,7 @@ enum Action {
     Root,
     Sock,
     Shutdown,
+    Spy,
     Serve,
     /// spawn an actor
     Spawn {
@@ -233,8 +234,8 @@ async fn respond(client: &Client, session_id: String, response: Response) -> any
     Ok(())
 }
 
-async fn client() -> Client {
-    connect(NATS_URL).await.unwrap()
+async fn client() -> Option<Client> {
+    connect(NATS_URL).await.ok()
 }
 
 fn cli_logger() -> Result<(), fern::InitError> {
@@ -297,6 +298,17 @@ async fn main() -> anyhow::Result<()> {
 
     let Cli { command } = Cli::parse();
     match command.init()? {
+        Action::Spy => {
+            if let Some(client) = client().await {
+                let mut subscriber = client.subscribe(EOS_SPY).await?;
+                while let Some(message) = subscriber.next().await {
+                    println!("{message:?}");
+                }
+                println!("disconnected");
+            } else {
+                eprintln!("Failed to connect to the server");
+            }
+        }
         Action::Root => {
             println!("{}", root().display())
         }
@@ -335,10 +347,14 @@ async fn main() -> anyhow::Result<()> {
         Action::Spawn { id, script } => {
             let script = script.to_string_lossy().to_string();
             let script = PathBuf::from_str(&shellexpand::full(&script)?)?;
-            spawn_actor(client().await, Props { id, script }).await?;
+            spawn_actor(
+                client().await.expect("Could not connect to server"),
+                Props { id, script },
+            )
+            .await?;
         }
         Action::List => {
-            list(client().await).await?;
+            list(client().await.expect("Could not connect to server")).await?;
         }
         Action::Send { path, msg, sender } => {
             let id = path
@@ -358,11 +374,15 @@ async fn main() -> anyhow::Result<()> {
                 to: id,
                 payload: serde_json::from_str(&msg)?,
             };
-            send(client().await, common::Command::Send(msg)).await?;
+            send(
+                client().await.expect("Could not connect to server"),
+                common::Command::Send(msg),
+            )
+            .await?;
         }
         Action::Kill { paths } => {
             send(
-                client().await,
+                client().await.expect("Could not connect to server"),
                 common::Command::Kill {
                     ids: paths
                         .iter()
@@ -374,7 +394,7 @@ async fn main() -> anyhow::Result<()> {
         }
         Action::Pause { path } => {
             send(
-                client().await,
+                client().await.expect("Could not connect to server"),
                 common::Command::Pause {
                     id: path.map(|p| p.file_name().unwrap().display().to_string()),
                 },
@@ -383,7 +403,7 @@ async fn main() -> anyhow::Result<()> {
         }
         Action::Unpause { path } => {
             send(
-                client().await,
+                client().await.expect("Could not connect to server"),
                 common::Command::Unpause {
                     id: path.map(|p| p.file_name().unwrap().display().to_string()),
                 },
@@ -392,14 +412,22 @@ async fn main() -> anyhow::Result<()> {
         }
         Action::Tick { command } => match command {
             TickCommand::Now => {
-                send(client().await, common::Command::Tick).await?;
+                send(
+                    client().await.expect("Could not connect to server"),
+                    common::Command::Tick,
+                )
+                .await?;
             }
             TickCommand::Reset => {
-                send(client().await, common::Command::ResetTick).await?;
+                send(
+                    client().await.expect("Could not connect to server"),
+                    common::Command::ResetTick,
+                )
+                .await?;
             }
             TickCommand::Set { milliseconds } => {
                 send(
-                    client().await,
+                    client().await.expect("Could not connect to server"),
                     common::Command::SetTick { tick: milliseconds },
                 )
                 .await?;
@@ -412,10 +440,10 @@ async fn main() -> anyhow::Result<()> {
             print!("{EOS_SOCKET}");
         }
         Action::Shutdown => {
-            send_shutdown(client().await).await?;
+            send_shutdown(client().await.expect("Could not connect to server")).await?;
         }
         Action::Serve => {
-            send_shutdown(client().await).await?;
+            send_shutdown(client().await.expect("Could not connect to server")).await?;
             tokio::time::sleep(Duration::from_millis(500)).await;
             let config = Arc::new(RwLock::new(Config { tick: DEFAULT_TICK }));
             let sys = Arc::new(RwLock::new(System::new()));
