@@ -2,6 +2,7 @@
 
 use std::{
     collections::{HashMap, VecDeque},
+    env::VarError,
     io::Write,
     path::{Path, PathBuf},
     sync::Arc,
@@ -29,7 +30,7 @@ pub enum EosError {
     IdAlreadyExists(String),
     #[error("Rune allocation error")]
     RuneAlloc(#[from] rune::alloc::Error),
-    #[error("Rune VM error")]
+    #[error("Rune VM error {0}")]
     VmError(#[from] VmError),
     #[error("Context error")]
     ContextError(#[from] ContextError),
@@ -43,6 +44,10 @@ pub enum EosError {
     JsonError(#[from] serde_json::Error),
     #[error("Runtime error")]
     RuntimeError(#[from] RuntimeError),
+    #[error("Shell error")]
+    ShellError(#[from] shellexpand::LookupError<VarError>),
+    #[error("IO error")]
+    Io(#[from] std::io::Error),
 }
 
 pub type EosResult<T> = Result<T, EosError>;
@@ -73,13 +78,13 @@ impl From<Message> for InternalMessage {
 }
 
 impl Actor {
-    pub async fn new(id: &str, script: impl AsRef<Path>) -> anyhow::Result<Self> {
+    pub async fn new(id: &str, script: impl AsRef<Path>) -> EosResult<Self> {
         let script = script.as_ref().to_string_lossy().to_string();
-        let full = shellexpand::full(&script)?;
-        let state = init(id, &script).await?;
+        let full = shellexpand::full(&script)?.to_string();
+        let state = init(id, &full).await?;
         Ok(Actor {
             id: id.to_string(),
-            script: PathBuf::from(full.to_string()),
+            script: PathBuf::from(full),
             state: serde_json::to_value(state)?,
             mailbox: VecDeque::new(),
             send_queue: VecDeque::new(),
@@ -97,7 +102,7 @@ impl Actor {
             ["handle"],
             (
                 serde_json::from_value::<rune::Value>(self.state.clone())?,
-                serde_json::from_value::<rune::Value>(dbg!(message.payload))?,
+                serde_json::from_value::<rune::Value>(serde_json::to_value(&message)?)?,
             ),
         )?;
         self.state = serde_json::to_value(state)?;
@@ -134,15 +139,7 @@ impl System {
 
     pub async fn spawn_actor(&mut self, Props { script, id }: Props) -> EosResult<String> {
         let id = id.unwrap_or_else(|| nanoid!());
-        let state = init(&id, &script).await?;
-        let actor = Actor {
-            id: id.clone(),
-            script,
-            state: serde_json::to_value(state)?,
-            mailbox: VecDeque::new(),
-            send_queue: VecDeque::new(),
-            paused: false,
-        };
+        let actor = Actor::new(&id, script).await?;
         if self.actors.contains_key(&id) {
             return Err(EosError::IdAlreadyExists(id));
         }
@@ -151,8 +148,6 @@ impl System {
     }
 
     pub async fn tick(&mut self) -> EosResult<()> {
-        dbg!(&self);
-
         if self.paused {
             return Ok(());
         }
