@@ -137,6 +137,7 @@ impl System {
     }
 
     pub async fn spawn_actor(&mut self, Props { script, id }: Props) -> EosResult<String> {
+        log::info!("spawn: {script:?} @ {id:?}");
         let id = id.unwrap_or_else(|| nanoid!());
         let actor = Actor::new(&id, script).await?;
         if self.actors.contains_key(&id) {

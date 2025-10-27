@@ -264,6 +264,7 @@ fn file_logger() -> Result<(), fern::InitError> {
             ))
         })
         .level(log::LevelFilter::Debug)
+        .level_for("rs9p", log::LevelFilter::Warn)
         .chain(std::io::stdout())
         .chain(fern::DateBased::new("/explore/logs/eos.log.", "%Y-%m-%d"))
         .apply()?;
