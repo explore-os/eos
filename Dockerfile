@@ -14,9 +14,9 @@ FROM chef AS builder
 COPY --from=planner /app/recipe.json recipe.json
 RUN cargo chef cook --release --recipe-path recipe.json
 COPY . .
-RUN cargo build --release -p eos --features _setup,remote
+RUN cargo build --release -p eos --features docker,_setup
 RUN mv target/release/eos target/release/setup
-RUN cargo build --release -p eos --features remote
+RUN cargo build --release -p eos --features docker
 
 FROM mcr.microsoft.com/vscode/devcontainers/base:debian AS runtime
 
@@ -40,6 +40,7 @@ COPY --from=builder /app/examples /explore/examples
 COPY --from=builder /app/demos /explore/demos
 RUN chmod +x /explore/demos/*
 
+COPY mount-eos.sh /
 COPY --from=builder /app/docker-entrypoint.sh /
 RUN chmod +x /docker-entrypoint.sh
 

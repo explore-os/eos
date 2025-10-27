@@ -857,7 +857,6 @@ impl FsOverlay {
         for (idx, msg) in actor.mailbox.iter().enumerate() {
             writeln!(output, "{}. From: {:?}", idx + 1, msg.from).unwrap();
             writeln!(output, "   To: {}", msg.to).unwrap();
-            writeln!(output, "   Kind: {:?}", msg.kind).unwrap();
             writeln!(
                 output,
                 "   Payload: {}",
@@ -884,7 +883,6 @@ impl FsOverlay {
         for (idx, msg) in actor.send_queue.iter().enumerate() {
             writeln!(output, "{}. From: {:?}", idx + 1, msg.from).unwrap();
             writeln!(output, "   To: {}", msg.to).unwrap();
-            writeln!(output, "   Kind: {:?}", msg.kind).unwrap();
             writeln!(
                 output,
                 "   Payload: {}",

@@ -13,21 +13,28 @@ lazy_static! {
     pub static ref SYSTEM: RwLock<System> = RwLock::new(System::new());
 }
 
-#[cfg(feature = "remote")]
+#[cfg(feature = "docker")]
 pub const NATS_URL: &str = "nats://msgbus:4222";
 
-#[cfg(not(feature = "remote"))]
+#[cfg(not(feature = "docker"))]
 pub const NATS_URL: &str = "nats://localhost:4222";
 
-pub const ROOT: &str = "/explore";
-pub const STORAGE_DIR: &str = "storage";
-// pub const ACTOR_DIR: &str = "actors";
-// pub const SPAWN_DIR: &str = "spawn";
-// pub const SEND_DIR: &str = "send";
-// pub const PAUSE_FILE: &str = "paused";
-// pub const STATE_FILE: &str = "state.json";
+pub mod dirs {
+    pub const LOGS: &str = "logs";
+    pub const STORAGE: &str = "storage";
+}
 pub const EOS_CTL: &str = "eos.ctl";
 pub const DEFAULT_TICK: u64 = 2000;
+
+#[cfg(feature = "docker")]
+const ROOT: &str = "/explore";
+
+#[cfg(not(feature = "docker"))]
+const ROOT: &str = ".";
+
+pub fn root() -> PathBuf {
+    PathBuf::from(ROOT)
+}
 
 const TELEPLOT_ADDR: &str = "127.0.0.1:47269";
 const TABLE: TableDefinition<&str, String> = TableDefinition::new("DATA");
@@ -64,16 +71,8 @@ pub struct Props {
     pub id: Option<String>,
 }
 
-#[derive(Debug, Serialize, Deserialize, PartialEq)]
-pub enum MessageKind {
-    Request,
-    Response,
-    Notification,
-}
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Message {
-    pub kind: MessageKind,
     pub from: Option<String>,
     pub to: String,
     pub payload: Value,

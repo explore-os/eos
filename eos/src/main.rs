@@ -1,5 +1,5 @@
 use std::{
-    path::{Path, PathBuf},
+    path::PathBuf,
     sync::Arc,
     time::{Duration, SystemTime},
 };
@@ -10,7 +10,7 @@ use bytes::Bytes;
 #[cfg(feature = "_setup")]
 use clap::Command;
 use clap::{Parser, Subcommand};
-use common::{EOS_CTL, Message, Props, ROOT, Request, Response, STORAGE_DIR};
+use common::{EOS_CTL, Message, Props, Request, Response};
 use futures_util::StreamExt;
 use nanoid::nanoid;
 
@@ -20,7 +20,11 @@ use rs9p::srv::srv_async_unix;
 use tokio::{spawn, sync::RwLock};
 
 use crate::{
-    common::{DEFAULT_TICK, NATS_URL, teleplot},
+    common::{
+        DEFAULT_TICK, NATS_URL,
+        dirs::{LOGS, STORAGE},
+        root, teleplot,
+    },
     file_overlay::FsOverlay,
     system::System,
 };
@@ -49,6 +53,7 @@ impl Cli {
 
 #[derive(Subcommand)]
 enum Action {
+    Root,
     Serve,
     /// spawn an actor
     Spawn {
@@ -101,7 +106,10 @@ enum Action {
 impl Action {
     fn init(self) -> Result<Self, fern::InitError> {
         if let Action::Serve = &self {
-            std::fs::create_dir_all("/explore/logs")?;
+            let logs = root().join(LOGS);
+            if !std::fs::exists(&logs)? {
+                std::fs::create_dir_all(logs)?;
+            }
             file_logger()?;
         } else {
             cli_logger()?;
@@ -266,10 +274,12 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let Cli { command } = Cli::parse();
-    let root = Path::new(ROOT);
-    let storage = root.join(STORAGE_DIR);
     match command.init()? {
+        Action::Root => {
+            println!("{}", root().display())
+        }
         Action::Db { name, command } => {
+            let storage = root().join(STORAGE);
             let db = common::Db::new(&storage, &name);
             match command {
                 DbCommand::Store { key, value } => {
@@ -320,7 +330,6 @@ async fn main() -> anyhow::Result<()> {
                     .to_string()
             });
             let msg = Message {
-                kind: common::MessageKind::Notification,
                 from: sender,
                 to: id,
                 payload: serde_json::from_str(&msg)?,

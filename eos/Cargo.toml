@@ -31,5 +31,5 @@ fern = {version = "0.7.1", features = ["date-based"]}
 humantime = "2.3.0"
 
 [features]
-remote = []
+docker = []
 _setup = ["dep:clap_complete"]

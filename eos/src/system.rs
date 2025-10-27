@@ -8,7 +8,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::common::{Message, MessageKind, Props, SYSTEM, teleplot};
+use crate::common::{Message, Props, SYSTEM, teleplot};
 use lazy_static::lazy_static;
 use nanoid::nanoid;
 use rune::{
@@ -28,25 +28,25 @@ use thiserror::Error;
 pub enum EosError {
     #[error("Actor with ID '{0}' already exists")]
     IdAlreadyExists(String),
-    #[error("Rune allocation error")]
+    #[error("Rune allocation error {0}")]
     RuneAlloc(#[from] rune::alloc::Error),
     #[error("Rune VM error {0}")]
     VmError(#[from] VmError),
-    #[error("Context error")]
+    #[error("Context error {0}")]
     ContextError(#[from] ContextError),
-    #[error("From path error")]
+    #[error("From path error {0}")]
     FromPathError(#[from] FromPathError),
-    #[error("Emit error")]
+    #[error("Emit error {0}")]
     EmitError(#[from] EmitError),
-    #[error("Build error")]
+    #[error("Build error {0}")]
     BuildError(#[from] BuildError),
-    #[error("JSON error")]
+    #[error("JSON error {0}")]
     JsonError(#[from] serde_json::Error),
-    #[error("Runtime error")]
+    #[error("Runtime error {0}")]
     RuntimeError(#[from] RuntimeError),
-    #[error("Shell error")]
+    #[error("Shell error {0}")]
     ShellError(#[from] shellexpand::LookupError<VarError>),
-    #[error("IO error")]
+    #[error("IO error {0}")]
     Io(#[from] std::io::Error),
 }
 
@@ -98,26 +98,27 @@ impl Actor {
         message: Message,
     ) -> EosResult<Option<Message>> {
         let mut vm = make_vm(&self.id, &self.script).await?;
-        let state = vm.call(
+        log::info!("{message:?}");
+        let result = vm.call(
             ["handle"],
             (
                 serde_json::from_value::<rune::Value>(self.state.clone())?,
-                serde_json::from_value::<rune::Value>(serde_json::to_value(&message)?)?,
+                serde_json::from_value::<rune::Value>(serde_json::to_value(&message.payload)?)?,
             ),
         )?;
-        self.state = serde_json::to_value(state)?;
-        if let Some(from) = message.from
-            && message.kind == MessageKind::Notification
-        {
-            Ok(Some(Message {
-                from: message.to.into(),
-                kind: MessageKind::Response,
-                payload: serde_json::json!({}),
-                to: from,
-            }))
-        } else {
-            Ok(None)
+        if let Ok((state, response)) = from_value::<(Object, Object)>(&result) {
+            self.state = serde_json::to_value(rune::Value::new(state)?)?;
+            if let Some(from) = message.from {
+                return Ok(Some(Message {
+                    from: message.to.into(),
+                    payload: serde_json::to_value(rune::Value::new(response)?)?,
+                    to: from,
+                }));
+            }
+        } else if let Ok(state) = from_value::<Object>(&result) {
+            self.state = serde_json::to_value(rune::Value::new(state)?)?;
         }
+        Ok(None)
     }
 }
 
@@ -199,7 +200,6 @@ async fn make_vm(id: &str, script: impl AsRef<Path>) -> EosResult<rune::Vm> {
         m.function("send", move |to: &str, value: rune::Value| {
             if let Some(this) = SYSTEM.write().unwrap().actors.get_mut(&id) {
                 this.send_queue.push_back(Message {
-                    kind: MessageKind::Notification,
                     from: Some(id.to_owned()),
                     to: to.to_owned(),
                     payload: serde_json::to_value(value).unwrap(),
