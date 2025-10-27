@@ -44,12 +44,12 @@ COPY mount-eos.sh /
 COPY --from=builder /app/docker-entrypoint.sh /
 RUN chmod +x /docker-entrypoint.sh
 
+RUN mkdir -p /etc/fish/completions && \
+        /setup /etc/fish/completions && \
+        rm /setup
+
 RUN mkdir -p /explore/system
 RUN chown -R vscode:vscode /explore
-RUN mkdir -p /home/vscode/.config/fish/completions && \
-        /setup /home/vscode/.config/fish/completions && \
-        chown -R vscode:vscode /home/vscode && \
-        rm /setup
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["/usr/local/bin/eos", "serve"]
