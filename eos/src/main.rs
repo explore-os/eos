@@ -208,11 +208,15 @@ struct Config {
 }
 
 async fn mount_9p_unix(socket: &str, mount_dir: &str) -> anyhow::Result<()> {
-    TokioCommand::new("mount")
+    TokioCommand::new("sudo")
+        .arg("mount")
         .arg("-t")
         .arg("9p")
         .arg("-o")
-        .arg("version=9p2000.L,trans=unix,uname=$USER")
+        .arg(format!(
+            "version=9p2000.L,trans=unix,uname={}",
+            std::env::var("USER")?
+        ))
         .arg(socket)
         .arg(mount_dir)
         .spawn()?
@@ -223,7 +227,8 @@ async fn mount_9p_unix(socket: &str, mount_dir: &str) -> anyhow::Result<()> {
 }
 
 async fn unmount(mount_dir: &str) -> anyhow::Result<()> {
-    TokioCommand::new("umount")
+    TokioCommand::new("sudo")
+        .arg("umount")
         .arg(mount_dir)
         .spawn()?
         .wait()

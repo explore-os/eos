@@ -9,9 +9,9 @@ FROM chef AS builder
 COPY --from=planner /app/recipe.json recipe.json
 RUN cargo chef cook --release --recipe-path recipe.json
 COPY . .
-RUN cargo build --release -p eos --features _setup,remote
+RUN cargo build --release -p eos --features _setup
 RUN mv target/release/eos target/release/setup
-RUN cargo build --release -p eos --features remote
+RUN cargo build --release --all
 
 FROM mcr.microsoft.com/vscode/devcontainers/base:debian AS runtime
 
