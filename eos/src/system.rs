@@ -10,7 +10,7 @@ use std::{
 
 use crate::{
     client,
-    common::{EOS_SPY, Message, Props, SYSTEM, teleplot},
+    common::{Message, Props, SYSTEM, teleplot},
 };
 use bytes::Bytes;
 use lazy_static::lazy_static;
@@ -139,6 +139,12 @@ impl System {
             paused: false,
         }
     }
+    pub async fn kill_actor(&mut self, id: &str) -> EosResult<()> {
+        if let Some(_) = self.actors.remove(id) {
+            log::info!("killed: id:{id:?}");
+        }
+        Ok(())
+    }
 
     pub async fn spawn_actor(&mut self, Props { script, id }: Props) -> EosResult<String> {
         log::info!("spawn: {script:?} @ id:{id:?}");
@@ -167,16 +173,10 @@ impl System {
             if let Some(msg) = actor.send_queue.pop_front() {
                 actor_messages.push(msg);
             }
-            if let Some(message) = actor.mailbox.pop_front() {
-                if let Some(client) = client().await {
-                    client
-                        .publish(EOS_SPY, Bytes::from(serde_json::to_vec(&message).unwrap()))
-                        .await
-                        .unwrap();
-                }
-                if let Some(response) = actor.run(&mut spawn_requests, message).await? {
-                    actor_messages.push(response);
-                }
+            if let Some(message) = actor.mailbox.pop_front()
+                && let Some(response) = actor.run(&mut spawn_requests, message).await?
+            {
+                actor_messages.push(response);
             }
         }
         for msg in actor_messages {

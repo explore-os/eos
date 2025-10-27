@@ -24,7 +24,6 @@ pub mod dirs {
     pub const STORAGE: &str = "storage";
 }
 pub const EOS_CTL: &str = "eos.ctl";
-pub const EOS_SPY: &str = "eos.spy";
 pub const EOS_SOCKET: &str = "/tmp/eos:0";
 pub const DEFAULT_TICK: u64 = 2000;
 

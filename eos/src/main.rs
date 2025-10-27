@@ -23,7 +23,7 @@ use tokio::{spawn, sync::RwLock};
 
 use crate::{
     common::{
-        DEFAULT_TICK, EOS_SOCKET, EOS_SPY, NATS_URL,
+        DEFAULT_TICK, EOS_SOCKET, NATS_URL,
         dirs::{LOGS, STORAGE},
         root, teleplot,
     },
@@ -58,7 +58,6 @@ enum Action {
     Root,
     Sock,
     Shutdown,
-    Spy,
     Serve,
     /// spawn an actor
     Spawn {
@@ -266,7 +265,7 @@ fn file_logger() -> Result<(), fern::InitError> {
                 message
             ))
         })
-        .level(log::LevelFilter::Debug)
+        .level(log::LevelFilter::Info)
         .level_for("rs9p", log::LevelFilter::Warn)
         .chain(std::io::stdout())
         .chain(fern::DateBased::new("/explore/logs/eos.log.", "%Y-%m-%d"))
@@ -298,17 +297,6 @@ async fn main() -> anyhow::Result<()> {
 
     let Cli { command } = Cli::parse();
     match command.init()? {
-        Action::Spy => {
-            if let Some(client) = client().await {
-                let mut subscriber = client.subscribe(EOS_SPY).await?;
-                while let Some(message) = subscriber.next().await {
-                    println!("{message:?}");
-                }
-                println!("disconnected");
-            } else {
-                eprintln!("Failed to connect to the server");
-            }
-        }
         Action::Root => {
             println!("{}", root().display())
         }
@@ -489,7 +477,13 @@ async fn main() -> anyhow::Result<()> {
                                             common::Command::Kill { ids } => {
                                                 let mut sys = sys.write().await;
                                                 for id in ids {
-                                                    sys.actors.remove(&id);
+                                                    if let Err(err) = sys.kill_actor(&id).await {
+                                                        log::error!(
+                                                            "Failed to kill actor {}: {}",
+                                                            id,
+                                                            err
+                                                        );
+                                                    }
                                                 }
                                                 Response::Done
                                             }
