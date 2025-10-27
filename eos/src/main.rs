@@ -139,6 +139,8 @@ enum TickCommand {
     },
     /// resets the tick rate of the system
     Reset,
+    /// Ticks once
+    Now,
 }
 
 async fn send(client: Client, cmd: common::Command) -> anyhow::Result<()> {
@@ -203,6 +205,10 @@ async fn respond(client: &Client, session_id: String, response: Response) -> any
     Ok(())
 }
 
+async fn client() -> Client {
+    connect(NATS_URL).await.unwrap()
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
@@ -216,7 +222,6 @@ async fn main() -> anyhow::Result<()> {
 
     let Cli { command } = Cli::parse();
     let root = Path::new(ROOT);
-    let client = connect(NATS_URL).await?;
     let storage = root.join(STORAGE_DIR);
     match command {
         Action::Db { name, command } => {
@@ -251,10 +256,10 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Action::Spawn { id, script } => {
-            spawn_actor(client, Props { id, script }).await?;
+            spawn_actor(client().await, Props { id, script }).await?;
         }
         Action::List => {
-            list(client).await?;
+            list(client().await).await?;
         }
         Action::Send { path, msg, sender } => {
             let id = path
@@ -275,11 +280,11 @@ async fn main() -> anyhow::Result<()> {
                 to: id,
                 payload: serde_json::from_str(&msg)?,
             };
-            send(client, common::Command::Send(msg)).await?;
+            send(client().await, common::Command::Send(msg)).await?;
         }
         Action::Pause { path } => {
             send(
-                client,
+                client().await,
                 common::Command::Pause {
                     id: path.map(|p| p.file_name().unwrap().display().to_string()),
                 },
@@ -288,7 +293,7 @@ async fn main() -> anyhow::Result<()> {
         }
         Action::Unpause { path } => {
             send(
-                client,
+                client().await,
                 common::Command::Unpause {
                     id: path.map(|p| p.file_name().unwrap().display().to_string()),
                 },
@@ -296,11 +301,18 @@ async fn main() -> anyhow::Result<()> {
             .await?;
         }
         Action::Tick { command } => match command {
+            TickCommand::Now => {
+                send(client().await, common::Command::Tick).await?;
+            }
             TickCommand::Reset => {
-                send(client, common::Command::ResetTick).await?;
+                send(client().await, common::Command::ResetTick).await?;
             }
             TickCommand::Set { milliseconds } => {
-                send(client, common::Command::SetTick { tick: milliseconds }).await?;
+                send(
+                    client().await,
+                    common::Command::SetTick { tick: milliseconds },
+                )
+                .await?;
             }
         },
         Action::Plot { value } => {
@@ -350,6 +362,15 @@ async fn main() -> anyhow::Result<()> {
                                                 }
                                                 Response::Done
                                             }
+                                            common::Command::Tick => {
+                                                let mut sys = sys.write().await;
+                                                match sys.tick().await {
+                                                    Ok(()) => Response::Done,
+                                                    Err(err) => Response::Failed {
+                                                        err: err.to_string(),
+                                                    },
+                                                }
+                                            }
                                             common::Command::SetTick { tick } => {
                                                 let mut config = config.write().await;
                                                 config.tick = tick;
@@ -398,7 +419,9 @@ async fn main() -> anyhow::Result<()> {
                     loop {
                         let tick = config.read().await.tick;
                         tokio::time::sleep(Duration::from_millis(tick)).await;
-                        sys.write().await.tick().await.unwrap();
+                        if let Err(e) = sys.write().await.tick().await {
+                            log::error!("Failed to tick: {e}");
+                        }
                     }
                 });
             }

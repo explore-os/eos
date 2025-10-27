@@ -14,7 +14,7 @@ lazy_static! {
 }
 
 #[cfg(feature = "remote")]
-pub const NATS_URL: &str = "nats://msghub:4222";
+pub const NATS_URL: &str = "nats://msgbus:4222";
 
 #[cfg(not(feature = "remote"))]
 pub const NATS_URL: &str = "nats://localhost:4222";
@@ -53,6 +53,7 @@ pub enum Command {
     Send(Message),
     Pause { id: Option<String> },
     Unpause { id: Option<String> },
+    Tick,
     SetTick { tick: u64 },
     ResetTick,
 }

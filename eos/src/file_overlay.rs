@@ -624,26 +624,29 @@ impl FsOverlay {
                         return Ok((true, true, 0));
                     }
 
-                    let actor = sys.actors.get(actor_id).unwrap();
-                    match parts[1] {
-                        "mailbox" => {
-                            let content = self.format_mailbox(actor);
-                            Ok((true, false, content.len() as u64))
+                    if let Some(actor) = sys.actors.get(actor_id) {
+                        match parts[1] {
+                            "mailbox" => {
+                                let content = self.format_mailbox(actor);
+                                Ok((true, false, content.len() as u64))
+                            }
+                            "send_queue" => {
+                                let content = self.format_send_queue(actor);
+                                Ok((true, false, content.len() as u64))
+                            }
+                            "script" => {
+                                let content = tokio::fs::read_to_string(&actor.script).await?;
+                                Ok((true, false, content.len() as u64))
+                            }
+                            "state" => {
+                                let content =
+                                    serde_json::to_string_pretty(&actor.state).unwrap_or_default();
+                                Ok((true, false, content.len() as u64))
+                            }
+                            _ => Ok((false, false, 0)),
                         }
-                        "send_queue" => {
-                            let content = self.format_send_queue(actor);
-                            Ok((true, false, content.len() as u64))
-                        }
-                        "script" => {
-                            let content = tokio::fs::read_to_string(&actor.script).await?;
-                            Ok((true, false, content.len() as u64))
-                        }
-                        "state" => {
-                            let content =
-                                serde_json::to_string_pretty(&actor.state).unwrap_or_default();
-                            Ok((true, false, content.len() as u64))
-                        }
-                        _ => Ok((false, false, 0)),
+                    } else {
+                        Ok((false, false, 0))
                     }
                 } else {
                     Ok((false, false, 0))
