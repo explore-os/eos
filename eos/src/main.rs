@@ -18,7 +18,7 @@ use nanoid::nanoid;
 #[cfg(feature = "_setup")]
 use clap_complete::{aot::Fish, generate_to};
 use rs9p::srv::srv_async_unix;
-use tokio::{process::Command as TokioCommand, spawn, sync::RwLock};
+use tokio::{spawn, sync::RwLock};
 
 use crate::{
     common::{DEFAULT_TICK, teleplot},
@@ -59,14 +59,6 @@ impl Cli {
 
 #[derive(Subcommand)]
 enum Action {
-    Mount {
-        #[arg(default_value = "/explore/system")]
-        target: PathBuf,
-    },
-    Unmount {
-        #[arg(default_value = "/explore/system")]
-        target: PathBuf,
-    },
     Serve,
     /// spawn an actor
     Spawn {
@@ -207,36 +199,6 @@ struct Config {
     tick: u64,
 }
 
-async fn mount_9p_unix(socket: &str, mount_dir: &str) -> anyhow::Result<()> {
-    TokioCommand::new("sudo")
-        .arg("mount")
-        .arg("-t")
-        .arg("9p")
-        .arg("-o")
-        .arg(format!(
-            "version=9p2000.L,trans=unix,uname={}",
-            std::env::var("USER")?
-        ))
-        .arg(socket)
-        .arg(mount_dir)
-        .spawn()?
-        .wait()
-        .await?;
-
-    Ok(())
-}
-
-async fn unmount(mount_dir: &str) -> anyhow::Result<()> {
-    TokioCommand::new("sudo")
-        .arg("umount")
-        .arg(mount_dir)
-        .spawn()?
-        .wait()
-        .await?;
-
-    Ok(())
-}
-
 async fn respond(client: &Client, session_id: String, response: Response) -> anyhow::Result<()> {
     if let Err(e) = client
         .publish(
@@ -266,12 +228,6 @@ async fn main() -> anyhow::Result<()> {
     let client = connect(&nats).await?;
     let storage = root.join(STORAGE_DIR);
     match command {
-        Action::Mount { target } => {
-            mount_9p_unix("/tmp/eos-operator:0", &target.to_string_lossy()).await?;
-        }
-        Action::Unmount { target } => {
-            unmount(&target.to_string_lossy()).await?;
-        }
         Action::Db { name, command } => {
             let db = common::Db::new(&storage, &name);
             match command {
