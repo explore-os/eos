@@ -1,5 +1,6 @@
 use std::{
     path::PathBuf,
+    str::FromStr,
     sync::Arc,
     time::{Duration, SystemTime},
 };
@@ -317,6 +318,8 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Action::Spawn { id, script } => {
+            let script = script.to_string_lossy().to_string();
+            let script = PathBuf::from_str(&shellexpand::full(&script)?)?;
             spawn_actor(client().await, Props { id, script }).await?;
         }
         Action::List => {

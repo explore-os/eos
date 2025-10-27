@@ -3,7 +3,7 @@ set -euo pipefail
 
 VSIX_PATH="/ext/teleplot-eos.vsix"
 
-SERVER_DIR="$HOME/.vscode-remote"
+SERVER_DIR="$HOME/.vscode-server"
 EXT_DIR="$SERVER_DIR/extensions"
 mkdir -p "$EXT_DIR"
 
