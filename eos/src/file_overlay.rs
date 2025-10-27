@@ -998,13 +998,13 @@ impl FsOverlay {
                                 }
                                 "mailbox" => {
                                     // Parse and add message to mailbox
-                                    let message: Message =
-                                        serde_json::from_str(content).map_err(|e| {
-                                            log::error!("Failed to parse message: {}", e);
-                                            rs9p::Error::No(EINVAL)
-                                        })?;
-                                    actor.mailbox.push_back(message);
-                                    log::info!("Added message to mailbox of actor {}", actor_id);
+                                    if let Ok(messages) = serde_json::from_str(content) {
+                                        actor.mailbox = messages;
+                                        log::info!(
+                                            "Added message to mailbox of actor {}",
+                                            actor_id
+                                        );
+                                    }
                                     return Ok(data.len() as u32);
                                 }
                                 "paused" => {
@@ -1061,25 +1061,7 @@ impl FsOverlay {
     /// Returns a formatted string showing all messages in the actor's
     /// incoming message queue with sender, recipient, and payload details.
     fn format_mailbox(&self, actor: &crate::system::Actor) -> String {
-        use std::fmt::Write;
-
-        let mut output = String::new();
-        writeln!(output, "Mailbox ({} messages):", actor.mailbox.len()).unwrap();
-        writeln!(output, "---").unwrap();
-
-        for (idx, msg) in actor.mailbox.iter().enumerate() {
-            writeln!(output, "{}. From: {:?}", idx + 1, msg.from).unwrap();
-            writeln!(output, "   To: {}", msg.to).unwrap();
-            writeln!(
-                output,
-                "   Payload: {}",
-                serde_json::to_string(&msg.payload).unwrap_or_default()
-            )
-            .unwrap();
-            writeln!(output).unwrap();
-        }
-
-        output
+        serde_json::to_string_pretty(&actor.mailbox).unwrap_or_else(|_| s!("[]"))
     }
 
     /// Format an actor's send queue as human-readable text

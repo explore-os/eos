@@ -23,7 +23,7 @@ use tokio::{spawn, sync::RwLock};
 
 use crate::{
     common::{
-        DEFAULT_TICK, NATS_URL,
+        DEFAULT_TICK, EOS_SOCKET, NATS_URL,
         dirs::{LOGS, STORAGE},
         root, teleplot,
     },
@@ -56,6 +56,8 @@ impl Cli {
 #[derive(Subcommand)]
 enum Action {
     Root,
+    Sock,
+    Shutdown,
     Serve,
     /// spawn an actor
     Spawn {
@@ -271,6 +273,18 @@ fn file_logger() -> Result<(), fern::InitError> {
     Ok(())
 }
 
+async fn send_shutdown(client: Client) -> anyhow::Result<()> {
+    Ok(client
+        .publish(
+            EOS_CTL,
+            Bytes::from(serde_json::to_vec(&Request {
+                session_id: String::new(),
+                cmd: common::Command::Shutdown,
+            })?),
+        )
+        .await?)
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
     #[cfg(feature = "_setup")]
@@ -394,7 +408,15 @@ async fn main() -> anyhow::Result<()> {
         Action::Plot { value } => {
             common::teleplot(&value)?;
         }
+        Action::Sock => {
+            print!("{EOS_SOCKET}");
+        }
+        Action::Shutdown => {
+            send_shutdown(client().await).await?;
+        }
         Action::Serve => {
+            send_shutdown(client().await).await?;
+            tokio::time::sleep(Duration::from_millis(500)).await;
             let config = Arc::new(RwLock::new(Config { tick: DEFAULT_TICK }));
             let sys = Arc::new(RwLock::new(System::new()));
 
@@ -409,6 +431,18 @@ async fn main() -> anyhow::Result<()> {
                                 match serde_json::from_slice::<common::Request>(&message.payload) {
                                     Ok(Request { session_id, cmd }) => {
                                         let response = match cmd {
+                                            common::Command::Shutdown => {
+                                                respond(&client, session_id, Response::Done)
+                                                    .await
+                                                    .unwrap();
+
+                                                nix::sys::signal::kill(
+                                                    nix::unistd::getpid(),
+                                                    nix::sys::signal::Signal::SIGTERM,
+                                                )
+                                                .unwrap();
+                                                std::process::exit(0);
+                                            }
                                             common::Command::Rename { old, new } => {
                                                 let mut sys = sys.write().await;
                                                 if sys.actors.contains_key(&new) {
@@ -524,7 +558,28 @@ async fn main() -> anyhow::Result<()> {
                 });
             }
 
-            srv_async_unix(FsOverlay::new(sys), "/tmp/eos-operator:0").await?;
+            spawn(async {
+                loop {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    if tokio::fs::try_exists(EOS_SOCKET).await.unwrap() {
+                        _ = tokio::process::Command::new("sudo")
+                            .arg("mount")
+                            .arg("-t")
+                            .arg("9p")
+                            .arg("-o")
+                            .arg(format!(
+                                "version=9p2000.L,trans=unix,uname={}",
+                                std::env::var("USER").unwrap_or_else(|_| s!("vscode"))
+                            ))
+                            .arg(EOS_SOCKET)
+                            .arg("/explore/system")
+                            .spawn();
+                        break;
+                    }
+                }
+            });
+
+            srv_async_unix(FsOverlay::new(sys), EOS_SOCKET).await?;
         }
     }
     Ok(())

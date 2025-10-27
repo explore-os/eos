@@ -6,4 +6,4 @@ done
 
 mkdir -p /explore/system &>/dev/null
 
-sudo mount -t 9p -o version=9p2000.L,trans=unix,uname=$USER /tmp/eos-operator:0 /explore/system
+sudo mount -t 9p -o version=9p2000.L,trans=unix,uname=$USER "$(/usr/local/bin/eos sock)" /explore/system

@@ -24,6 +24,7 @@ pub mod dirs {
     pub const STORAGE: &str = "storage";
 }
 pub const EOS_CTL: &str = "eos.ctl";
+pub const EOS_SOCKET: &str = "/tmp/eos:0";
 pub const DEFAULT_TICK: u64 = 2000;
 
 #[cfg(feature = "docker")]
@@ -65,6 +66,7 @@ pub enum Command {
     ResetTick,
     Rename { old: String, new: String },
     Kill { ids: Vec<String> },
+    Shutdown,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
