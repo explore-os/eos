@@ -1,7 +1,7 @@
 use std::{
     path::{Path, PathBuf},
     sync::Arc,
-    time::Duration,
+    time::{Duration, SystemTime},
 };
 
 use anyhow::bail;
@@ -11,7 +11,6 @@ use bytes::Bytes;
 use clap::Command;
 use clap::{Parser, Subcommand};
 use common::{EOS_CTL, Message, Props, ROOT, Request, Response, STORAGE_DIR};
-use env_logger::Env;
 use futures_util::StreamExt;
 use nanoid::nanoid;
 
@@ -97,6 +96,18 @@ enum Action {
     Plot {
         value: String,
     },
+}
+
+impl Action {
+    fn init(self) -> Result<Self, fern::InitError> {
+        if let Action::Serve = &self {
+            std::fs::create_dir_all("/explore/logs")?;
+            file_logger()?;
+        } else {
+            cli_logger()?;
+        }
+        Ok(self)
+    }
 }
 
 #[derive(Subcommand)]
@@ -209,9 +220,43 @@ async fn client() -> Client {
     connect(NATS_URL).await.unwrap()
 }
 
+fn cli_logger() -> Result<(), fern::InitError> {
+    fern::Dispatch::new()
+        .format(|out, message, record| {
+            out.finish(format_args!(
+                "[{} {} {}] {}",
+                humantime::format_rfc3339_seconds(SystemTime::now()),
+                record.level(),
+                record.target(),
+                message
+            ))
+        })
+        .level(log::LevelFilter::Debug)
+        .chain(std::io::stdout())
+        .apply()?;
+    Ok(())
+}
+
+fn file_logger() -> Result<(), fern::InitError> {
+    fern::Dispatch::new()
+        .format(|out, message, record| {
+            out.finish(format_args!(
+                "[{} {} {}] {}",
+                humantime::format_rfc3339_seconds(SystemTime::now()),
+                record.level(),
+                record.target(),
+                message
+            ))
+        })
+        .level(log::LevelFilter::Debug)
+        .chain(std::io::stdout())
+        .chain(fern::DateBased::new("/explore/logs/eos.log.", "%Y-%m-%d"))
+        .apply()?;
+    Ok(())
+}
+
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    env_logger::Builder::from_env(Env::default().default_filter_or("info")).init();
     #[cfg(feature = "_setup")]
     {
         let SetupCli { out_dir } = SetupCli::parse();
@@ -223,7 +268,7 @@ async fn main() -> anyhow::Result<()> {
     let Cli { command } = Cli::parse();
     let root = Path::new(ROOT);
     let storage = root.join(STORAGE_DIR);
-    match command {
+    match command.init()? {
         Action::Db { name, command } => {
             let db = common::Db::new(&storage, &name);
             match command {

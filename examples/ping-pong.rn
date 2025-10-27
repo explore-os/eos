@@ -1,6 +1,6 @@
 pub fn handle(state, msg) {
     state.count += 1;
-    let sender = msg["sender"];
+    let sender = msg["from"];
     let response = msg["payload"];
 
     response["state"] = match response["state"] {

@@ -52,6 +52,8 @@ pub struct InternalMessage {
     pub sender: Option<String>,
     pub payload: Value,
 }
+
+#[derive(Debug)]
 pub struct Actor {
     pub id: String,
     pub mailbox: VecDeque<Message>,
@@ -95,7 +97,7 @@ impl Actor {
             ["handle"],
             (
                 serde_json::from_value::<rune::Value>(self.state.clone())?,
-                serde_json::from_value::<rune::Value>(message.payload)?,
+                serde_json::from_value::<rune::Value>(dbg!(message.payload))?,
             ),
         )?;
         self.state = serde_json::to_value(state)?;
@@ -114,6 +116,7 @@ impl Actor {
     }
 }
 
+#[derive(Debug)]
 pub struct System {
     pub spawn_queue: Vec<Props>,
     pub actors: HashMap<String, Actor>,
@@ -148,6 +151,8 @@ impl System {
     }
 
     pub async fn tick(&mut self) -> EosResult<()> {
+        dbg!(&self);
+
         if self.paused {
             return Ok(());
         }
@@ -204,6 +209,8 @@ async fn make_vm(id: &str, script: impl AsRef<Path>) -> EosResult<rune::Vm> {
                     to: to.to_owned(),
                     payload: serde_json::to_value(value).unwrap(),
                 });
+            } else {
+                log::warn!("Actor died after sending a message");
             }
         })
         .build()?;
