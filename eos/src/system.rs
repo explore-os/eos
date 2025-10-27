@@ -72,10 +72,12 @@ impl From<Message> for InternalMessage {
 
 impl Actor {
     pub async fn new(id: &str, script: impl AsRef<Path>) -> anyhow::Result<Self> {
+        let script = script.as_ref().to_string_lossy().to_string();
+        let full = shellexpand::full(&script)?;
         let state = init(id, &script).await?;
         Ok(Actor {
             id: id.to_string(),
-            script: script.as_ref().to_path_buf(),
+            script: PathBuf::from(full.to_string()),
             state: serde_json::to_value(state)?,
             mailbox: VecDeque::new(),
             send_queue: VecDeque::new(),
