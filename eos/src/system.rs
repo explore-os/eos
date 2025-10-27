@@ -147,7 +147,7 @@ impl System {
     }
 
     pub async fn spawn_actor(&mut self, Props { script, id }: Props) -> EosResult<String> {
-        log::info!("spawn: {script:?} @ id:{id:?}");
+        log::info!("spawn: id:{id:?}");
         let id = id.unwrap_or_else(|| nanoid!());
         let actor = Actor::new(&id, &script).await?;
         if self.actors.contains_key(&id) {
@@ -189,7 +189,7 @@ impl System {
     }
 }
 
-async fn init(id: &str, script: impl AsRef<Path>) -> EosResult<rune::Value> {
+async fn init(id: &str, script: &str) -> EosResult<rune::Value> {
     let vm = make_vm(id, script).await?;
     if let Ok(init) = vm.lookup_function(["init"]) {
         Ok(init.call(()).into_result()?)
@@ -202,7 +202,7 @@ fn empty_state() -> EosResult<rune::Value> {
     Ok(rune::Value::new(Object::new())?)
 }
 
-async fn make_vm(id: &str, script: impl AsRef<Path>) -> EosResult<rune::Vm> {
+async fn make_vm(id: &str, script: &str) -> EosResult<rune::Vm> {
     let mut m = Module::new();
     {
         let id = id.to_owned();
@@ -228,7 +228,7 @@ async fn make_vm(id: &str, script: impl AsRef<Path>) -> EosResult<rune::Vm> {
 
     let runtime = Arc::new(context.runtime()?);
     let mut sources = Sources::new();
-    sources.insert(Source::from_path(script)?)?;
+    sources.insert(Source::memory(&script)?)?;
 
     let mut diagnostics = Diagnostics::new();
 
