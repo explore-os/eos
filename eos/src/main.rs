@@ -18,7 +18,7 @@ use nanoid::nanoid;
 #[cfg(feature = "_setup")]
 use clap_complete::{aot::Fish, generate_to};
 use rs9p::srv::srv_async_unix;
-use tokio::{process::Command, spawn, sync::RwLock};
+use tokio::{process::Command as TokioCommand, spawn, sync::RwLock};
 
 use crate::{
     common::{DEFAULT_TICK, teleplot},
@@ -37,7 +37,14 @@ struct SetupCli {
 }
 #[derive(Parser)]
 struct Cli {
-    #[arg(short, long, default_value = "nats://localhost:4222")]
+    #[cfg_attr(
+        feature = "remote",
+        arg(short, long, default_value = "nats://msgbus:4222")
+    )]
+    #[cfg_attr(
+        not(feature = "remote"),
+        arg(short, long, default_value = "nats://localhost:4222")
+    )]
     nats: String,
     #[command(subcommand)]
     command: Action,
@@ -201,7 +208,7 @@ struct Config {
 }
 
 async fn mount_9p_unix(socket: &str, mount_dir: &str) -> anyhow::Result<()> {
-    Command::new("mount")
+    TokioCommand::new("mount")
         .arg("-t")
         .arg("9p")
         .arg("-o")
@@ -216,7 +223,7 @@ async fn mount_9p_unix(socket: &str, mount_dir: &str) -> anyhow::Result<()> {
 }
 
 async fn unmount(mount_dir: &str) -> anyhow::Result<()> {
-    Command::new("umount")
+    TokioCommand::new("umount")
         .arg(mount_dir)
         .spawn()?
         .wait()

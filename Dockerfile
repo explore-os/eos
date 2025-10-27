@@ -9,9 +9,9 @@ FROM chef AS builder
 COPY --from=planner /app/recipe.json recipe.json
 RUN cargo chef cook --release --recipe-path recipe.json
 COPY . .
-RUN cargo build --release -p eos --features _setup
+RUN cargo build --release -p eos --features _setup,remote
 RUN mv target/release/eos target/release/setup
-RUN cargo build --release --all
+RUN cargo build --release -p eos --features remote
 
 FROM mcr.microsoft.com/vscode/devcontainers/base:debian AS runtime
 
@@ -32,7 +32,6 @@ COPY --from=builder /app/docker-entrypoint.sh /
 RUN chmod +x /docker-entrypoint.sh
 
 RUN mkdir -p /explore/system
-RUN echo '/tmp/eos-operator:0  /explore/system  9p  noauto,user,version=9p2000.L,trans=unix,uname=vscode  0  0' >> /etc/fstab
 RUN chown -R vscode:vscode /explore
 RUN mkdir -p /home/vscode/.config/fish/completions && \
         /setup /home/vscode/.config/fish/completions && \

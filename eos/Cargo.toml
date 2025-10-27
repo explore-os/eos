@@ -30,4 +30,5 @@ async-trait = "0.1.89"
 thiserror = "2.0.17"
 
 [features]
+remote = []
 _setup = ["dep:clap_complete"]
