@@ -1,8 +1,8 @@
 //! 9P Filesystem overlay for exposing System internals
 //!
 //! This module implements a 9P2000.L filesystem that exposes the internal state
-//! of the actor system as a virtual filesystem. This allows inspection and monitoring
-//! of the system through standard filesystem operations.
+//! of the actor system as a virtual filesystem. This allows inspection, monitoring,
+//! and modification of the system through standard filesystem operations.
 //!
 //! # Filesystem Structure
 //!
@@ -10,13 +10,14 @@
 //!
 //! ```text
 //! /
-//! ├── spawn_queue       # Pending actor spawn requests (file)
+//! ├── spawn_queue       # Pending actor spawn requests (read-only)
 //! └── actors/           # Directory of all actors
 //!     └── {actor_id}/   # Directory for each actor
-//!         ├── mailbox   # Actor's incoming message queue
-//!         ├── send_queue # Actor's outgoing message queue
-//!         ├── script    # Path to actor's script
-//!         └── state     # Actor's current state (JSON)
+//!         ├── mailbox   # Actor's incoming message queue (writable)
+//!         ├── send_queue # Actor's outgoing message queue (read-only)
+//!         ├── script    # Path to actor's script (read-only)
+//!         ├── state     # Actor's current state in JSON (writable)
+//!         └── paused    # Actor's paused state as boolean (writable)
 //! ```
 //!
 //! # Usage
@@ -27,9 +28,19 @@
 //! # Using 9pfuse (if available)
 //! 9pfuse 'unix!/tmp/eos-operator:0' /mnt/eos
 //!
-//! # Then browse the filesystem
+//! # Read actor state
 //! ls /mnt/eos/actors
 //! cat /mnt/eos/actors/{id}/state
+//!
+//! # Modify actor state (write JSON)
+//! echo '{"counter": 42}' > /mnt/eos/actors/{id}/state
+//!
+//! # Pause/unpause an actor
+//! echo 'true' > /mnt/eos/actors/{id}/paused
+//! echo 'false' > /mnt/eos/actors/{id}/paused
+//!
+//! # Send a message to an actor (write JSON message)
+//! echo '{"from":"sender","to":"receiver","payload":{"data":"value"}}' > /mnt/eos/actors/{id}/mailbox
 //! ```
 //!
 //! # File Format
@@ -37,6 +48,28 @@
 //! - Directory listings are tab-separated: `name\ttype\tsize\n`
 //! - Actor state is formatted as pretty-printed JSON
 //! - Message queues show detailed message information
+//! - Paused state is a boolean string ("true" or "false")
+//!
+//! # Write Buffering
+//!
+//! The filesystem implements write buffering to support editors like `vi` that perform
+//! multiple write operations:
+//!
+//! - Writes are accumulated in a per-file buffer during editing
+//! - The buffer is flushed on `fsync()` (save) or `close()` (exit) operations
+//! - This ensures compatibility with standard text editors
+//!
+//! # Writable Files
+//!
+//! The following files support write operations:
+//!
+//! - **`/actors/{id}/state`**: Write JSON to update the actor's internal state.
+//!   The entire state is replaced with the written JSON object.
+//!
+//! - **`/actors/{id}/mailbox`**: Write a JSON message to add it to the actor's
+//!   incoming message queue. Message format: `{"from":"sender_id","to":"actor_id","payload":{...}}`
+//!
+//! - **`/actors/{id}/paused`**: Write "true" or "false" to pause or unpause the actor.
 
 #![allow(unused)]
 
@@ -49,6 +82,8 @@ use rs9p::{
     error::errno::*,
     srv::{FId, Filesystem},
 };
+
+use crate::common::Message;
 use stringlit::s;
 use tokio::sync::RwLock;
 
@@ -68,13 +103,16 @@ const S_IFREG: u32 = 0o100000;
 
 /// Default permissions for directories (rwxr-xr-x)
 const DIR_MODE: u32 = 0o755;
-/// Default permissions for files (rw-r--r--)
-const FILE_MODE: u32 = 0o444;
+/// Default permissions for files (rw-rw-r--)
+const FILE_MODE: u32 = 0o664;
 
 /// 9P filesystem overlay that exposes System internals
 ///
 /// This structure wraps the actor system and implements the 9P filesystem
-/// protocol to provide read-only access to system state.
+/// protocol to provide read and write access to system state.
+///
+/// Writable files include actor state, mailbox, and paused status.
+/// See module-level documentation for details on write operations.
 #[derive(Clone)]
 pub struct FsOverlay {
     /// The actor system being exposed, wrapped in Arc<RwLock> for thread-safe access
@@ -102,6 +140,8 @@ pub struct MyFId {
     pub path: RwLock<String>,
     /// Whether this fid represents a directory
     pub is_dir: RwLock<bool>,
+    /// Write buffer for accumulating writes before commit
+    pub write_buffer: RwLock<Option<Vec<u8>>>,
 }
 
 impl MyFId {
@@ -115,6 +155,7 @@ impl MyFId {
         Self {
             path: RwLock::new(path),
             is_dir: RwLock::new(is_dir),
+            write_buffer: RwLock::new(None),
         }
     }
 
@@ -282,7 +323,18 @@ impl Filesystem for FsOverlay {
         })
     }
 
-    async fn rclunk(&self, _id: &FId<Self::FId>) -> Result<FCall> {
+    async fn rclunk(&self, fid: &FId<Self::FId>) -> Result<FCall> {
+        // Flush any buffered writes before closing the file
+        let mut write_buffer = fid.aux.write_buffer.write().await;
+        if let Some(buffer) = write_buffer.take() {
+            let path = fid.aux.path.read().await.clone();
+            log::debug!("rclunk: flushing {} bytes for path {}", buffer.len(), path);
+
+            // Get write lock on system and write the buffered data
+            let mut sys = self.sys.write().await;
+            let _ = self.write_file(&mut sys, &path, &buffer).await;
+        }
+
         Ok(FCall::RClunk)
     }
 
@@ -408,6 +460,57 @@ impl Filesystem for FsOverlay {
         }
     }
 
+    async fn rwrite(&self, fid: &FId<Self::FId>, offset: u64, data: &Data) -> Result<FCall> {
+        let path = fid.aux.path.read().await.clone();
+        let is_dir = *fid.aux.is_dir.read().await;
+
+        log::debug!(
+            "rwrite: path={}, is_dir={}, offset={}, data_len={}",
+            path,
+            is_dir,
+            offset,
+            data.0.len()
+        );
+
+        // Cannot write to directories
+        if is_dir {
+            return Err(rs9p::Error::No(EISDIR));
+        }
+
+        // Get or create write buffer
+        let mut write_buffer = fid.aux.write_buffer.write().await;
+        let buffer = write_buffer.get_or_insert_with(Vec::new);
+
+        // Handle offset-based writes
+        if offset as usize > buffer.len() {
+            // Extend buffer with zeros if offset is beyond current size
+            buffer.resize(offset as usize, 0);
+        }
+
+        // Write data at offset
+        if offset as usize == buffer.len() {
+            // Append to end
+            buffer.extend_from_slice(&data.0);
+        } else {
+            // Overwrite at offset
+            let end = (offset as usize + data.0.len()).min(buffer.len());
+            if offset as usize + data.0.len() > buffer.len() {
+                // Need to extend
+                buffer.resize(offset as usize + data.0.len(), 0);
+            }
+            buffer[offset as usize..offset as usize + data.0.len()].copy_from_slice(&data.0);
+        }
+
+        let count = data.0.len() as u32;
+        log::debug!(
+            "rwrite: buffered {} bytes, total buffer size: {}",
+            count,
+            buffer.len()
+        );
+
+        Ok(FCall::RWrite { count })
+    }
+
     async fn rlopen(&self, fid: &FId<Self::FId>, _flags: u32) -> Result<FCall> {
         let qid_type = if *fid.aux.is_dir.read().await {
             QIdType::DIR
@@ -424,6 +527,36 @@ impl Filesystem for FsOverlay {
             },
             iounit: 8192,
         })
+    }
+
+    async fn rfsync(&self, fid: &FId<Self::FId>) -> Result<FCall> {
+        // Flush any buffered writes to the actual system
+        log::debug!("rfsync: called");
+
+        let mut write_buffer = fid.aux.write_buffer.write().await;
+        if let Some(buffer) = write_buffer.take() {
+            let path = fid.aux.path.read().await.clone();
+            log::debug!("rfsync: flushing {} bytes for path {}", buffer.len(), path);
+
+            // Get write lock on system and write the buffered data
+            let mut sys = self.sys.write().await;
+            self.write_file(&mut sys, &path, &buffer).await?;
+        }
+
+        Ok(FCall::RFSync)
+    }
+
+    async fn rsetattr(
+        &self,
+        _fid: &FId<Self::FId>,
+        _valid: rs9p::SetAttrMask,
+        _stat: &rs9p::SetAttr,
+    ) -> Result<FCall> {
+        // For our virtual filesystem, we don't allow changing file attributes
+        // like timestamps, permissions, etc. through setattr
+        // This is mainly used by editors to preserve timestamps
+        log::debug!("rsetattr: called (no-op)");
+        Ok(FCall::RSetAttr)
     }
 
     async fn rreaddir(&self, fid: &FId<Self::FId>, offset: u64, count: u32) -> Result<FCall> {
@@ -643,6 +776,10 @@ impl FsOverlay {
                                     serde_json::to_string_pretty(&actor.state).unwrap_or_default();
                                 Ok((true, false, content.len() as u64))
                             }
+                            "paused" => {
+                                let content = actor.paused.to_string();
+                                Ok((true, false, content.len() as u64))
+                            }
                             _ => Ok((false, false, 0)),
                         }
                     } else {
@@ -712,6 +849,11 @@ impl FsOverlay {
                                     serde_json::to_string_pretty(&actor.state)
                                         .unwrap_or_default()
                                         .len() as u64,
+                                ),
+                                (
+                                    "paused".to_string(),
+                                    false,
+                                    actor.paused.to_string().len() as u64,
                                 ),
                             ]);
                         }
@@ -811,12 +953,83 @@ impl FsOverlay {
                                         .unwrap_or_default()
                                         .into_bytes());
                                 }
+                                "paused" => {
+                                    return Ok(actor.paused.to_string().into_bytes());
+                                }
                                 _ => {}
                             }
                         }
                     }
                 }
                 Ok(vec![])
+            }
+        }
+    }
+
+    /// Write data to a file in the virtual filesystem
+    ///
+    /// # Arguments
+    ///
+    /// * `sys` - Mutable reference to the System
+    /// * `path` - Virtual filesystem path of the file
+    /// * `data` - Data to write to the file
+    async fn write_file(&self, sys: &mut System, path: &str, data: &[u8]) -> Result<u32> {
+        // Parse the data as a string
+        let content = std::str::from_utf8(data).map_err(|_| rs9p::Error::No(EINVAL))?;
+
+        match path {
+            _ => {
+                if path.starts_with("/actors/") {
+                    let parts: Vec<&str> = path.trim_start_matches("/actors/").split('/').collect();
+                    if parts.len() >= 2 {
+                        let actor_id = parts[0];
+                        if let Some(actor) = sys.actors.get_mut(actor_id) {
+                            match parts[1] {
+                                "state" => {
+                                    // Parse and update actor state
+                                    let new_state: serde_json::Value =
+                                        serde_json::from_str(content).map_err(|e| {
+                                            log::error!("Failed to parse JSON state: {}", e);
+                                            rs9p::Error::No(EINVAL)
+                                        })?;
+                                    actor.state = new_state;
+                                    log::info!("Updated state for actor {}", actor_id);
+                                    return Ok(data.len() as u32);
+                                }
+                                "mailbox" => {
+                                    // Parse and add message to mailbox
+                                    let message: Message =
+                                        serde_json::from_str(content).map_err(|e| {
+                                            log::error!("Failed to parse message: {}", e);
+                                            rs9p::Error::No(EINVAL)
+                                        })?;
+                                    actor.mailbox.push_back(message);
+                                    log::info!("Added message to mailbox of actor {}", actor_id);
+                                    return Ok(data.len() as u32);
+                                }
+                                "paused" => {
+                                    // Parse and update paused state
+                                    let paused: bool = content.trim().parse().map_err(|e| {
+                                        log::error!("Failed to parse paused state: {}", e);
+                                        rs9p::Error::No(EINVAL)
+                                    })?;
+                                    actor.paused = paused;
+                                    log::info!(
+                                        "Updated paused state for actor {} to {}",
+                                        actor_id,
+                                        paused
+                                    );
+                                    return Ok(data.len() as u32);
+                                }
+                                _ => {}
+                            }
+                        } else {
+                            return Err(rs9p::Error::No(ENOENT));
+                        }
+                    }
+                }
+                // File not writable or doesn't exist
+                Err(rs9p::Error::No(EROFS))
             }
         }
     }
