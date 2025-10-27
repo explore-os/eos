@@ -161,13 +161,13 @@ impl System {
             if actor.paused {
                 continue;
             }
+            if let Some(msg) = actor.send_queue.pop_front() {
+                actor_messages.push(msg);
+            }
             if let Some(message) = actor.mailbox.pop_front()
                 && let Some(response) = actor.run(&mut spawn_requests, message).await?
             {
                 actor_messages.push(response);
-            }
-            if let Some(msg) = actor.send_queue.pop_front() {
-                actor_messages.push(msg);
             }
         }
         for msg in actor_messages {

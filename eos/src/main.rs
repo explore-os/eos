@@ -65,8 +65,8 @@ enum Action {
     },
     /// Kill an actor
     Kill {
-        /// the directory for the actor to kill
-        path: PathBuf,
+        /// the directories for the actors to kill
+        paths: Vec<PathBuf>,
     },
     /// list all the running actors
     List,
@@ -342,11 +342,14 @@ async fn main() -> anyhow::Result<()> {
             };
             send(client().await, common::Command::Send(msg)).await?;
         }
-        Action::Kill { path } => {
+        Action::Kill { paths } => {
             send(
                 client().await,
                 common::Command::Kill {
-                    id: path.file_name().unwrap().display().to_string(),
+                    ids: paths
+                        .iter()
+                        .map(|p| p.file_name().unwrap().display().to_string())
+                        .collect(),
                 },
             )
             .await?;
@@ -417,9 +420,11 @@ async fn main() -> anyhow::Result<()> {
                                                     Response::Done
                                                 }
                                             }
-                                            common::Command::Kill { id } => {
+                                            common::Command::Kill { ids } => {
                                                 let mut sys = sys.write().await;
-                                                sys.actors.remove(&id);
+                                                for id in ids {
+                                                    sys.actors.remove(&id);
+                                                }
                                                 Response::Done
                                             }
                                             common::Command::Pause { id } => {

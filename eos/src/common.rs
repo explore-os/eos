@@ -64,7 +64,7 @@ pub enum Command {
     SetTick { tick: u64 },
     ResetTick,
     Rename { old: String, new: String },
-    Kill { id: String },
+    Kill { ids: Vec<String> },
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
