@@ -1,6 +1,5 @@
 use std::{
     path::PathBuf,
-    str::FromStr,
     sync::Arc,
     time::{Duration, SystemTime},
 };
@@ -333,8 +332,10 @@ async fn main() -> anyhow::Result<()> {
             }
         }
         Action::Spawn { id, script } => {
-            let script = script.to_string_lossy().to_string();
-            let script = PathBuf::from_str(&shellexpand::full(&script)?)?;
+            let script = tokio::fs::read_to_string(PathBuf::from(
+                shellexpand::full(&script.display().to_string())?.to_string(),
+            ))
+            .await?;
             spawn_actor(
                 client().await.expect("Could not connect to server"),
                 Props { id, script },

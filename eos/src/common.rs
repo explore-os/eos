@@ -71,7 +71,7 @@ pub enum Command {
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Props {
-    pub script: PathBuf,
+    pub script: String,
     pub id: Option<String>,
 }
 

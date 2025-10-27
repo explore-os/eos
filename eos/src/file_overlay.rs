@@ -1004,6 +1004,11 @@ impl FsOverlay {
                                     }
                                     return Ok(data.len() as u32);
                                 }
+                                "script" => {
+                                    actor.script = content.to_owned();
+                                    log::info!("Updated script of actor {}", actor_id);
+                                    return Ok(data.len() as u32);
+                                }
                                 "paused" => {
                                     // Parse and update paused state
                                     let paused: bool = content.trim().parse().map_err(|e| {
@@ -1036,21 +1041,7 @@ impl FsOverlay {
     /// Returns a formatted string showing all pending actor spawn requests
     /// with their script paths, IDs, and initial state.
     fn format_spawn_queue(&self, sys: &System) -> String {
-        use std::fmt::Write;
-
-        let mut output = String::new();
-        writeln!(output, "Spawn Queue ({} items):", sys.spawn_queue.len()).unwrap();
-        writeln!(output, "---").unwrap();
-
-        for (idx, props) in sys.spawn_queue.iter().enumerate() {
-            writeln!(output, "{}. Script: {}", idx + 1, props.script.display()).unwrap();
-            if let Some(ref id) = props.id {
-                writeln!(output, "   ID: {}", id).unwrap();
-            }
-            writeln!(output).unwrap();
-        }
-
-        output
+        serde_json::to_string_pretty(&sys.spawn_queue).unwrap_or_else(|_| s!("[]"))
     }
 
     /// Format an actor's mailbox as human-readable text
@@ -1066,24 +1057,6 @@ impl FsOverlay {
     /// Returns a formatted string showing all messages in the actor's
     /// outgoing message queue with sender, recipient, and payload details.
     fn format_send_queue(&self, actor: &crate::system::Actor) -> String {
-        use std::fmt::Write;
-
-        let mut output = String::new();
-        writeln!(output, "Send Queue ({} messages):", actor.send_queue.len()).unwrap();
-        writeln!(output, "---").unwrap();
-
-        for (idx, msg) in actor.send_queue.iter().enumerate() {
-            writeln!(output, "{}. From: {:?}", idx + 1, msg.from).unwrap();
-            writeln!(output, "   To: {}", msg.to).unwrap();
-            writeln!(
-                output,
-                "   Payload: {}",
-                serde_json::to_string(&msg.payload).unwrap_or_default()
-            )
-            .unwrap();
-            writeln!(output).unwrap();
-        }
-
-        output
+        serde_json::to_string_pretty(&actor.send_queue).unwrap_or_else(|_| s!("[]"))
     }
 }

@@ -67,7 +67,7 @@ pub struct Actor {
     pub id: String,
     pub mailbox: VecDeque<Message>,
     pub send_queue: VecDeque<Message>,
-    pub script: PathBuf,
+    pub script: String,
     pub state: JsonValue,
     pub paused: bool,
 }
@@ -82,11 +82,11 @@ impl From<Message> for InternalMessage {
 }
 
 impl Actor {
-    pub async fn new(id: &str, script: impl AsRef<Path>) -> EosResult<Self> {
+    pub async fn new(id: &str, script: &str) -> EosResult<Self> {
         let state = init(id, &script).await?;
         Ok(Actor {
             id: id.to_string(),
-            script: script.as_ref().to_path_buf(),
+            script: script.to_owned(),
             state: serde_json::to_value(state)?,
             mailbox: VecDeque::new(),
             send_queue: VecDeque::new(),
@@ -149,7 +149,7 @@ impl System {
     pub async fn spawn_actor(&mut self, Props { script, id }: Props) -> EosResult<String> {
         log::info!("spawn: {script:?} @ id:{id:?}");
         let id = id.unwrap_or_else(|| nanoid!());
-        let actor = Actor::new(&id, script).await?;
+        let actor = Actor::new(&id, &script).await?;
         if self.actors.contains_key(&id) {
             return Err(EosError::IdAlreadyExists(id));
         }
