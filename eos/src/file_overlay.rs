@@ -767,10 +767,7 @@ impl FsOverlay {
                                 let content = self.format_send_queue(actor);
                                 Ok((true, false, content.len() as u64))
                             }
-                            "script" => {
-                                let content = tokio::fs::read_to_string(&actor.script).await?;
-                                Ok((true, false, content.len() as u64))
-                            }
+                            "script" => Ok((true, false, actor.script.len() as u64)),
                             "state" => {
                                 let content =
                                     serde_json::to_string_pretty(&actor.state).unwrap_or_default();
@@ -838,11 +835,7 @@ impl FsOverlay {
                                     false,
                                     self.format_send_queue(actor).len() as u64,
                                 ),
-                                (
-                                    "script".to_string(),
-                                    false,
-                                    tokio::fs::read_to_string(&actor.script).await?.len() as u64,
-                                ),
+                                ("script".to_string(), false, actor.script.len() as u64),
                                 (
                                     "state".to_string(),
                                     false,
@@ -945,8 +938,7 @@ impl FsOverlay {
                                     return Ok(self.format_send_queue(actor).into_bytes());
                                 }
                                 "script" => {
-                                    let content = tokio::fs::read_to_string(&actor.script).await?;
-                                    return Ok(content.into_bytes());
+                                    return Ok(actor.script.clone().into_bytes());
                                 }
                                 "state" => {
                                     return Ok(serde_json::to_string_pretty(&actor.state)
