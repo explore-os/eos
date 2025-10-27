@@ -20,9 +20,7 @@ RUN apt-get update && \
         rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY --from=builder /app/target/release/supervisor /usr/local/bin
 COPY --from=builder /app/target/release/eos /usr/local/bin
-COPY --from=builder /app/target/release/script-actor /usr/local/bin
 COPY --from=builder /app/target/release/setup /
 
 RUN mkdir /explore
@@ -33,6 +31,8 @@ RUN chmod +x /explore/demos/*
 COPY --from=builder /app/docker-entrypoint.sh /
 RUN chmod +x /docker-entrypoint.sh
 
+RUN mkdir -p /explore/system
+RUN echo '/tmp/eos-operator:0  /explore/system  9p  noauto,user,version=9p2000.L,trans=unix,uname=vscode  0  0' >> /etc/fstab
 RUN chown -R vscode:vscode /explore
 RUN mkdir -p /home/vscode/.config/fish/completions && \
         /setup /home/vscode/.config/fish/completions && \
@@ -40,4 +40,4 @@ RUN mkdir -p /home/vscode/.config/fish/completions && \
         rm /setup
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
-CMD ["/usr/local/bin/supervisor", "--force"]
+CMD ["/usr/local/bin/eos", "serve"]

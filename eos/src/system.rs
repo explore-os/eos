@@ -1,0 +1,223 @@
+#![allow(unused)]
+
+use std::{
+    collections::{HashMap, VecDeque},
+    path::{Path, PathBuf},
+    sync::Arc,
+};
+
+use crate::common::{Message, MessageKind, Props, teleplot};
+use nanoid::nanoid;
+use rune::{
+    BuildError, Context, ContextError, Diagnostics, Module, Source, Sources, ToValue, Value, Vm,
+    diagnostics::EmitError,
+    from_value,
+    runtime::{Object, RuntimeError, VmError},
+    source::FromPathError,
+    termcolor::{ColorChoice, StandardStream},
+    to_value,
+};
+use serde_json::Value as JsonValue;
+use thiserror::Error;
+
+#[derive(Debug, Error)]
+pub enum EosError {
+    #[error("Actor with ID '{0}' already exists")]
+    IdAlreadyExists(String),
+    #[error("Rune allocation error")]
+    RuneAlloc(#[from] rune::alloc::Error),
+    #[error("Rune VM error")]
+    VmError(#[from] VmError),
+    #[error("Context error")]
+    ContextError(#[from] ContextError),
+    #[error("From path error")]
+    FromPathError(#[from] FromPathError),
+    #[error("Emit error")]
+    EmitError(#[from] EmitError),
+    #[error("Build error")]
+    BuildError(#[from] BuildError),
+    #[error("JSON error")]
+    JsonError(#[from] serde_json::Error),
+    #[error("Runtime error")]
+    RuntimeError(#[from] RuntimeError),
+}
+
+pub type EosResult<T> = Result<T, EosError>;
+
+#[derive(ToValue)]
+pub struct InternalMessage {
+    pub sender: Option<String>,
+    pub payload: Value,
+}
+pub struct Actor {
+    pub id: String,
+    pub mailbox: VecDeque<Message>,
+    pub send_queue: VecDeque<Message>,
+    pub script: PathBuf,
+    pub state: JsonValue,
+    pub paused: bool,
+}
+
+impl From<Message> for InternalMessage {
+    fn from(value: Message) -> Self {
+        InternalMessage {
+            sender: value.from,
+            payload: serde_json::from_value(value.payload).unwrap(),
+        }
+    }
+}
+
+impl Actor {
+    pub async fn new(id: &str, script: impl AsRef<Path>) -> anyhow::Result<Self> {
+        let state = init(id, &script).await?;
+        Ok(Actor {
+            id: id.to_string(),
+            script: script.as_ref().to_path_buf(),
+            state: serde_json::to_value(state)?,
+            mailbox: VecDeque::new(),
+            send_queue: VecDeque::new(),
+            paused: false,
+        })
+    }
+
+    pub async fn run(
+        &mut self,
+        spawn_queue: &mut [Props],
+        message: Message,
+    ) -> EosResult<Option<Message>> {
+        let mut vm = make_vm(&self.id, &self.script).await?;
+        let state = vm.call(
+            ["handle"],
+            (
+                serde_json::from_value::<rune::Value>(self.state.clone())?,
+                serde_json::from_value::<rune::Value>(message.payload)?,
+            ),
+        )?;
+        self.state = serde_json::to_value(state)?;
+        if let Some(from) = message.from
+            && message.kind == MessageKind::Notification
+        {
+            Ok(Some(Message {
+                from: message.to.into(),
+                kind: MessageKind::Response,
+                payload: serde_json::json!({}),
+                to: from,
+            }))
+        } else {
+            Ok(None)
+        }
+    }
+}
+
+pub struct System {
+    pub nats: String,
+    pub spawn_queue: Vec<Props>,
+    pub actors: HashMap<String, Actor>,
+    pub paused: bool,
+}
+
+impl System {
+    pub fn new(nats: &str) -> Self {
+        System {
+            nats: nats.to_string(),
+            spawn_queue: Vec::new(),
+            actors: HashMap::new(),
+            paused: false,
+        }
+    }
+
+    pub async fn spawn_actor(&mut self, Props { script, id }: Props) -> EosResult<String> {
+        let id = id.unwrap_or_else(|| nanoid!());
+        let state = init(&id, &script).await?;
+        let actor = Actor {
+            id: id.clone(),
+            script,
+            state: serde_json::to_value(state)?,
+            mailbox: VecDeque::new(),
+            send_queue: VecDeque::new(),
+            paused: false,
+        };
+        if self.actors.contains_key(&id) {
+            return Err(EosError::IdAlreadyExists(id));
+        }
+        self.actors.insert(id.clone(), actor);
+        Ok(id)
+    }
+
+    pub async fn tick(&mut self) -> EosResult<()> {
+        if self.paused {
+            return Ok(());
+        }
+        while let Some(request) = self.spawn_queue.pop() {
+            self.spawn_actor(request).await?;
+        }
+        let mut actor_messages = Vec::new();
+        let mut spawn_requests = Vec::new();
+        for actor in self.actors.values_mut() {
+            if actor.paused {
+                continue;
+            }
+            if let Some(message) = actor.mailbox.pop_front()
+                && let Some(response) = actor.run(&mut spawn_requests, message).await?
+            {
+                actor_messages.push(response);
+            }
+            if let Some(msg) = actor.send_queue.pop_front() {
+                actor_messages.push(msg);
+            }
+        }
+        for msg in actor_messages {
+            if let Some(actor) = self.actors.get_mut(&msg.to) {
+                actor.mailbox.push_back(msg);
+            }
+        }
+        self.spawn_queue = spawn_requests;
+        Ok(())
+    }
+}
+
+async fn init(id: &str, script: impl AsRef<Path>) -> EosResult<rune::Value> {
+    let vm = make_vm(id, script).await?;
+    if let Ok(init) = vm.lookup_function(["init"]) {
+        Ok(init.call(()).into_result()?)
+    } else {
+        empty_state()
+    }
+}
+
+fn empty_state() -> EosResult<rune::Value> {
+    Ok(rune::Value::new(Object::new())?)
+}
+
+async fn make_vm(id: &str, script: impl AsRef<Path>) -> EosResult<rune::Vm> {
+    let mut m = Module::new();
+    {
+        m.function("send", move |to: &str, value: rune::Value| {})
+            .build()?;
+    }
+    {
+        m.function("plot", |value: &str| teleplot(value)).build()?;
+    }
+
+    let mut context = Context::with_default_modules()?;
+    context.install(m)?;
+
+    let runtime = Arc::new(context.runtime()?);
+    let mut sources = Sources::new();
+    sources.insert(Source::from_path(script)?)?;
+
+    let mut diagnostics = Diagnostics::new();
+
+    let result = rune::prepare(&mut sources)
+        .with_context(&context)
+        .with_diagnostics(&mut diagnostics)
+        .build();
+
+    if !diagnostics.is_empty() {
+        let mut writer = StandardStream::stderr(ColorChoice::Always);
+        diagnostics.emit(&mut writer, &sources)?;
+    }
+
+    let unit = result?;
+    Ok(Vm::new(runtime, Arc::new(unit)))
+}

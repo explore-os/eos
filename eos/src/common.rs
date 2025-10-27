@@ -1,66 +1,22 @@
-use std::net::UdpSocket;
 use std::path::PathBuf;
+use std::{net::UdpSocket, path::Path};
 
 use redb::{CacheStats, Database, ReadableDatabase, TableDefinition};
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
+use serde_json::Value;
 
 pub const ROOT: &str = "/explore";
-pub const PID_FILE: &str = ".pid";
-pub const TICK_FILE: &str = ".tick";
-pub const MAILBOX_DIR: &str = "spool";
-pub const MAILBOX_HEAD: &str = "current";
-pub const ACTOR_DIR: &str = "actors";
 pub const STORAGE_DIR: &str = "storage";
-pub const SPAWN_DIR: &str = "spawn";
-pub const SEND_DIR: &str = "send";
-pub const PAUSE_FILE: &str = "paused";
-pub const STATE_FILE: &str = "state.json";
+// pub const ACTOR_DIR: &str = "actors";
+// pub const SPAWN_DIR: &str = "spawn";
+// pub const SEND_DIR: &str = "send";
+// pub const PAUSE_FILE: &str = "paused";
+// pub const STATE_FILE: &str = "state.json";
 pub const EOS_CTL: &str = "eos.ctl";
+pub const DEFAULT_TICK: u64 = 2000;
 
 const TELEPLOT_ADDR: &str = "127.0.0.1:47269";
 const TABLE: TableDefinition<&str, String> = TableDefinition::new("DATA");
-
-pub struct Dirs {
-    pub root_dir: PathBuf,
-    pub spawn_dir: PathBuf,
-    pub actor_dir: PathBuf,
-    pub send_dir: PathBuf,
-    pub storage_dir: PathBuf,
-}
-
-impl Dirs {
-    pub fn init() -> anyhow::Result<Self> {
-        let Self {
-            root_dir,
-            actor_dir,
-            spawn_dir,
-            send_dir,
-            storage_dir,
-        } = Self::get();
-
-        // std::fs::create_dir_all(&actor_dir)?;
-        // std::fs::create_dir_all(&storage_dir)?;
-        // std::fs::create_dir_all(&spawn_dir)?;
-        // std::fs::create_dir_all(&send_dir)?;
-        Ok(Self {
-            root_dir,
-            actor_dir,
-            spawn_dir,
-            send_dir,
-            storage_dir,
-        })
-    }
-    pub fn get() -> Self {
-        let root = PathBuf::from(ROOT);
-        Self {
-            root_dir: root.clone(),
-            spawn_dir: root.join(SPAWN_DIR),
-            actor_dir: root.join(ACTOR_DIR),
-            storage_dir: root.join(STORAGE_DIR),
-            send_dir: root.join(SEND_DIR),
-        }
-    }
-}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub enum Response {
@@ -80,23 +36,32 @@ pub struct Request {
 pub enum Command {
     Spawn { props: Props },
     List,
-    Update,
+    Send(Message),
+    Pause { id: Option<String> },
+    Unpause { id: Option<String> },
+    SetTick { tick: u64 },
+    ResetTick,
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Props {
+    pub script: PathBuf,
     pub id: Option<String>,
-    pub path: PathBuf,
-    #[serde(default)]
-    pub args: Vec<String>,
-    #[serde(default)]
-    pub copy: Vec<PathBuf>,
+}
+
+#[derive(Debug, Serialize, Deserialize, PartialEq)]
+pub enum MessageKind {
+    Request,
+    Response,
+    Notification,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct Message {
-    pub sender: Option<String>,
-    pub payload: serde_json::Value,
+    pub kind: MessageKind,
+    pub from: Option<String>,
+    pub to: String,
+    pub payload: Value,
 }
 
 pub fn teleplot(value: &str) -> anyhow::Result<()> {
@@ -107,19 +72,20 @@ pub fn teleplot(value: &str) -> anyhow::Result<()> {
 
 #[derive(Clone)]
 pub struct Db {
+    storage_dir: PathBuf,
     name: String,
 }
 
 impl Db {
-    pub fn new(name: &str) -> Self {
+    pub fn new(storage_dir: impl AsRef<Path>, name: &str) -> Self {
         Self {
+            storage_dir: storage_dir.as_ref().to_path_buf(),
             name: name.to_string(),
         }
     }
 
     fn db(&self) -> anyhow::Result<Database> {
-        let Dirs { storage_dir, .. } = Dirs::get();
-        Ok(Database::create(storage_dir.join(&self.name))?)
+        Ok(Database::create(self.storage_dir.join(&self.name))?)
     }
 
     pub fn stats(&self) -> anyhow::Result<CacheStats> {
