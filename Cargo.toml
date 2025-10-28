@@ -7,6 +7,7 @@ authors = ["hardliner66"]
 license = "MIT OR Apache-2.0"
 repository = "https://github.com/explore-os/eos"
 documentation = "https://docs.rs/explore-os/latest/explore-os/"
+include = ["src", "README.md"]
 
 [[bin]]
 name = "eos"
