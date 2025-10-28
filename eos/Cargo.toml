@@ -5,7 +5,7 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.100"
-async-nats = "0.44.2"
+tarpc = { version = "0.34", features = ["tokio1", "serde1", "serde-transport", "serde-transport-bincode", "unix"] }
 clap = { version = "4.5.49", features = ["derive"] }
 clap_complete = { version = "4.5.59", optional = true }
 nanoid = "0.4.0"

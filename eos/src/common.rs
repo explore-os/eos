@@ -13,18 +13,12 @@ lazy_static! {
     pub static ref SYSTEM: RwLock<System> = RwLock::new(System::new());
 }
 
-#[cfg(feature = "docker")]
-pub const NATS_URL: &str = "nats://msgbus:4222";
-
-#[cfg(not(feature = "docker"))]
-pub const NATS_URL: &str = "nats://localhost:4222";
-
 pub mod dirs {
     pub const LOGS: &str = "logs";
     pub const STORAGE: &str = "storage";
 }
-pub const EOS_CTL: &str = "eos.ctl";
 pub const EOS_SOCKET: &str = "/tmp/eos:0";
+pub const RPC_SOCKET: &str = "/tmp/eos_rpc.sock";
 pub const DEFAULT_TICK: u64 = 2000;
 
 #[cfg(feature = "docker")]
@@ -48,25 +42,19 @@ pub enum Response {
     Actors { actors: Vec<String> },
 }
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct Request {
-    pub session_id: String,
-    pub cmd: Command,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-pub enum Command {
-    Spawn { props: Props },
-    List,
-    Send(Message),
-    Pause { id: Option<String> },
-    Unpause { id: Option<String> },
-    Tick,
-    SetTick { tick: u64 },
-    ResetTick,
-    Rename { old: String, new: String },
-    Kill { ids: Vec<String> },
-    Shutdown,
+#[tarpc::service]
+pub trait EosService {
+    async fn spawn(props: Props) -> Response;
+    async fn list() -> Response;
+    async fn send(message: Message) -> Response;
+    async fn pause(id: Option<String>) -> Response;
+    async fn unpause(id: Option<String>) -> Response;
+    async fn tick() -> Response;
+    async fn set_tick(tick: u64) -> Response;
+    async fn reset_tick() -> Response;
+    async fn rename(old: String, new: String) -> Response;
+    async fn kill(ids: Vec<String>) -> Response;
+    async fn shutdown() -> Response;
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]

@@ -5,15 +5,15 @@ use std::{
 };
 
 use anyhow::bail;
-use async_nats::{Client, connect};
-use bytes::Bytes;
+
 #[cfg(feature = "_setup")]
 use clap::Command;
 use clap::{Parser, Subcommand};
-use common::{EOS_CTL, Message, Props, Request, Response};
+use common::{EosServiceClient, Message, Props, Response};
 use futures_util::StreamExt;
-use nanoid::nanoid;
+
 use stringlit::s;
+use tarpc::{client, context, tokio_serde::formats::Bincode};
 
 #[cfg(feature = "_setup")]
 use clap_complete::{aot::Fish, generate_to};
@@ -22,7 +22,7 @@ use tokio::{spawn, sync::RwLock};
 
 use crate::{
     common::{
-        DEFAULT_TICK, EOS_SOCKET, NATS_URL,
+        DEFAULT_TICK, EOS_SOCKET, RPC_SOCKET,
         dirs::{LOGS, STORAGE},
         root, teleplot,
     },
@@ -170,75 +170,43 @@ enum TickCommand {
     Now,
 }
 
-async fn send(client: Client, cmd: common::Command) -> anyhow::Result<()> {
-    let session = nanoid!();
-
-    let mut sub = client.subscribe(format!("eos.response.{session}")).await?;
-
-    client
-        .publish(
-            EOS_CTL,
-            Bytes::from(serde_json::to_vec(&Request {
-                session_id: session.clone(),
-                cmd,
-            })?),
-        )
-        .await?;
-
-    while let Some(msg) = sub.next().await {
-        if let Ok(response) = serde_json::from_slice::<Response>(&msg.payload) {
-            match response {
-                Response::Done => {
-                    println!("Command executed successfully");
-                }
-                Response::Actors { actors } => {
-                    println!("Actors: {:?}", actors);
-                }
-                Response::Spawned { id } => {
-                    println!("Actor spawned with id: {id}");
-                }
-                Response::Failed { err } => {
-                    eprintln!("Failed to spawn actor: {err}")
-                }
-            }
-            break;
+async fn handle_response(response: Response) {
+    match response {
+        Response::Done => {
+            println!("Command executed successfully");
+        }
+        Response::Actors { actors } => {
+            println!("Actors: {:?}", actors);
+        }
+        Response::Spawned { id } => {
+            println!("Actor spawned with id: {id}");
+        }
+        Response::Failed { err } => {
+            eprintln!("Failed: {err}")
         }
     }
+}
 
+async fn spawn_actor(client: &EosServiceClient, props: Props) -> anyhow::Result<()> {
+    let response = client.spawn(context::current(), props).await?;
+    handle_response(response).await;
     Ok(())
 }
 
-async fn spawn_actor(client: Client, props: Props) -> anyhow::Result<()> {
-    send(client, common::Command::Spawn { props }).await
-}
-async fn list(client: Client) -> anyhow::Result<()> {
-    send(client, common::Command::List).await
+async fn list(client: &EosServiceClient) -> anyhow::Result<()> {
+    let response = client.list(context::current()).await?;
+    handle_response(response).await;
+    Ok(())
 }
 
 struct Config {
     tick: u64,
 }
 
-async fn respond(client: &Client, session_id: String, response: Response) -> anyhow::Result<()> {
-    let payload = match serde_json::to_vec(&response) {
-        Ok(vec) => vec,
-        Err(e) => {
-            log::error!("Failed to serialize response: {e}");
-            return Err(e.into());
-        }
-    };
-
-    if let Err(e) = client
-        .publish(format!("eos.response.{session_id}"), Bytes::from(payload))
-        .await
-    {
-        log::error!("Failed to publish response: {e}");
-    }
-    Ok(())
-}
-
-async fn client() -> Option<Client> {
-    connect(NATS_URL).await.ok()
+async fn client() -> anyhow::Result<EosServiceClient> {
+    let transport = tarpc::serde_transport::unix::connect(RPC_SOCKET, Bincode::default);
+    let transport = transport.await?;
+    Ok(EosServiceClient::new(client::Config::default(), transport).spawn())
 }
 
 fn cli_logger() -> Result<(), fern::InitError> {
@@ -277,16 +245,10 @@ fn file_logger() -> Result<(), fern::InitError> {
     Ok(())
 }
 
-async fn send_shutdown(client: Client) -> anyhow::Result<()> {
-    Ok(client
-        .publish(
-            EOS_CTL,
-            Bytes::from(serde_json::to_vec(&Request {
-                session_id: String::new(),
-                cmd: common::Command::Shutdown,
-            })?),
-        )
-        .await?)
+async fn send_shutdown(client: &EosServiceClient) -> anyhow::Result<()> {
+    let response = client.shutdown(context::current()).await?;
+    handle_response(response).await;
+    Ok(())
 }
 
 #[tokio::main]
@@ -341,16 +303,12 @@ async fn main() -> anyhow::Result<()> {
                 shellexpand::full(&script.display().to_string())?.to_string(),
             ))
             .await?;
-            let client = client()
-                .await
-                .ok_or_else(|| anyhow::anyhow!("Could not connect to server"))?;
-            spawn_actor(client, Props { id, script }).await?;
+            let client = client().await?;
+            spawn_actor(&client, Props { id, script }).await?;
         }
         Action::List => {
-            let client = client()
-                .await
-                .ok_or_else(|| anyhow::anyhow!("Could not connect to server"))?;
-            list(client).await?;
+            let client = client().await?;
+            list(&client).await?;
         }
         Action::Send { path, msg, sender } => {
             let id = path
@@ -372,10 +330,9 @@ async fn main() -> anyhow::Result<()> {
                 to: id,
                 payload: serde_json::from_str(&msg)?,
             };
-            let client = client()
-                .await
-                .ok_or_else(|| anyhow::anyhow!("Could not connect to server"))?;
-            send(client, common::Command::Send(msg)).await?;
+            let client = client().await?;
+            let response = client.send(context::current(), msg).await?;
+            handle_response(response).await;
         }
         Action::Kill { paths } => {
             let ids: Result<Vec<_>, _> = paths
@@ -387,10 +344,9 @@ async fn main() -> anyhow::Result<()> {
                 })
                 .collect();
 
-            let client = client()
-                .await
-                .ok_or_else(|| anyhow::anyhow!("Could not connect to server"))?;
-            send(client, common::Command::Kill { ids: ids? }).await?;
+            let client = client().await?;
+            let response = client.kill(context::current(), ids?).await?;
+            handle_response(response).await;
         }
         Action::Pause { path } => {
             let id = match path {
@@ -403,10 +359,9 @@ async fn main() -> anyhow::Result<()> {
                 None => None,
             };
 
-            let client = client()
-                .await
-                .ok_or_else(|| anyhow::anyhow!("Could not connect to server"))?;
-            send(client, common::Command::Pause { id }).await?;
+            let client = client().await?;
+            let response = client.pause(context::current(), id).await?;
+            handle_response(response).await;
         }
         Action::Unpause { path } => {
             let id = match path {
@@ -419,31 +374,27 @@ async fn main() -> anyhow::Result<()> {
                 None => None,
             };
 
-            let client = client()
-                .await
-                .ok_or_else(|| anyhow::anyhow!("Could not connect to server"))?;
-            send(client, common::Command::Unpause { id }).await?;
+            let client = client().await?;
+            let response = client.unpause(context::current(), id).await?;
+            handle_response(response).await;
         }
-        Action::Tick { command } => match command {
-            TickCommand::Now => {
-                let client = client()
-                    .await
-                    .ok_or_else(|| anyhow::anyhow!("Could not connect to server"))?;
-                send(client, common::Command::Tick).await?;
+        Action::Tick { command } => {
+            let client = client().await?;
+            match command {
+                TickCommand::Now => {
+                    let response = client.tick(context::current()).await?;
+                    handle_response(response).await;
+                }
+                TickCommand::Reset => {
+                    let response = client.reset_tick(context::current()).await?;
+                    handle_response(response).await;
+                }
+                TickCommand::Set { milliseconds } => {
+                    let response = client.set_tick(context::current(), milliseconds).await?;
+                    handle_response(response).await;
+                }
             }
-            TickCommand::Reset => {
-                let client = client()
-                    .await
-                    .ok_or_else(|| anyhow::anyhow!("Could not connect to server"))?;
-                send(client, common::Command::ResetTick).await?;
-            }
-            TickCommand::Set { milliseconds } => {
-                let client = client()
-                    .await
-                    .ok_or_else(|| anyhow::anyhow!("Could not connect to server"))?;
-                send(client, common::Command::SetTick { tick: milliseconds }).await?;
-            }
-        },
+        }
         Action::Plot { value } => {
             common::teleplot(&value)?;
         }
@@ -451,160 +402,179 @@ async fn main() -> anyhow::Result<()> {
             print!("{EOS_SOCKET}");
         }
         Action::Shutdown => {
-            let client = client()
-                .await
-                .ok_or_else(|| anyhow::anyhow!("Could not connect to server"))?;
-            send_shutdown(client).await?;
+            let client = client().await?;
+            send_shutdown(&client).await?;
         }
         Action::Serve => {
-            if let Some(client) = client().await {
-                let _ = send_shutdown(client).await;
+            if let Ok(client) = client().await {
+                let _ = send_shutdown(&client).await;
             }
             tokio::time::sleep(Duration::from_millis(500)).await;
             let config = Arc::new(RwLock::new(Config { tick: DEFAULT_TICK }));
             let sys = Arc::new(RwLock::new(System::new()));
 
+            // Start RPC server
             {
-                let config = config.clone();
-                let sys = sys.clone();
+                use common::EosService;
+                use tarpc::server::{self, Channel};
+
+                #[derive(Clone)]
+                struct EosServer {
+                    config: Arc<RwLock<Config>>,
+                    sys: Arc<RwLock<System>>,
+                }
+
+                impl EosService for EosServer {
+                    async fn spawn(self, _: context::Context, props: Props) -> Response {
+                        match self.sys.write().await.spawn_actor(props).await {
+                            Ok(id) => {
+                                _ = teleplot("system.actor.spawned:1");
+                                Response::Spawned { id }
+                            }
+                            Err(err) => Response::Failed {
+                                err: err.to_string(),
+                            },
+                        }
+                    }
+
+                    async fn list(self, _: context::Context) -> Response {
+                        let actors = self
+                            .sys
+                            .read()
+                            .await
+                            .actors
+                            .keys()
+                            .cloned()
+                            .collect::<Vec<_>>();
+                        Response::Actors { actors }
+                    }
+
+                    async fn send(self, _: context::Context, msg: Message) -> Response {
+                        let mut sys = self.sys.write().await;
+                        if let Some(actor) = sys.actors.get_mut(&msg.to) {
+                            actor.mailbox.push_back(dbg!(msg));
+                        }
+                        Response::Done
+                    }
+
+                    async fn pause(self, _: context::Context, id: Option<String>) -> Response {
+                        let mut sys = self.sys.write().await;
+                        if let Some(id) = id
+                            && let Some(actor) = sys.actors.get_mut(&id)
+                        {
+                            actor.paused = true;
+                        } else {
+                            sys.paused = true;
+                        }
+                        Response::Done
+                    }
+
+                    async fn unpause(self, _: context::Context, id: Option<String>) -> Response {
+                        let mut sys = self.sys.write().await;
+                        if let Some(id) = id
+                            && let Some(actor) = sys.actors.get_mut(&id)
+                        {
+                            actor.paused = false;
+                        } else {
+                            sys.paused = false;
+                        }
+                        Response::Done
+                    }
+
+                    async fn tick(self, _: context::Context) -> Response {
+                        let mut sys = self.sys.write().await;
+                        match sys.tick().await {
+                            Ok(()) => Response::Done,
+                            Err(err) => Response::Failed {
+                                err: err.to_string(),
+                            },
+                        }
+                    }
+
+                    async fn set_tick(self, _: context::Context, tick: u64) -> Response {
+                        let mut config = self.config.write().await;
+                        config.tick = tick;
+                        Response::Done
+                    }
+
+                    async fn reset_tick(self, _: context::Context) -> Response {
+                        let mut config = self.config.write().await;
+                        config.tick = DEFAULT_TICK;
+                        Response::Done
+                    }
+
+                    async fn rename(
+                        self,
+                        _: context::Context,
+                        old: String,
+                        new: String,
+                    ) -> Response {
+                        let mut sys = self.sys.write().await;
+                        if sys.actors.contains_key(&new) {
+                            Response::Failed {
+                                err: s!("Actor with the same id already exists"),
+                            }
+                        } else {
+                            if let Some(actor) = sys.actors.remove(&old) {
+                                sys.actors.insert(new, actor);
+                            }
+                            Response::Done
+                        }
+                    }
+
+                    async fn kill(self, _: context::Context, ids: Vec<String>) -> Response {
+                        let mut sys = self.sys.write().await;
+                        for id in ids {
+                            if let Err(err) = sys.kill_actor(&id).await {
+                                log::error!("Failed to kill actor {}: {}", id, err);
+                            }
+                        }
+                        Response::Done
+                    }
+
+                    async fn shutdown(self, _: context::Context) -> Response {
+                        if let Err(e) = nix::sys::signal::kill(
+                            nix::unistd::getpid(),
+                            nix::sys::signal::Signal::SIGTERM,
+                        ) {
+                            log::error!("Failed to send SIGTERM: {}", e);
+                        }
+                        std::process::exit(0);
+                    }
+                }
+
+                let config_clone = config.clone();
+                let sys_clone = sys.clone();
                 spawn(async move {
-                    if let Ok(client) = async_nats::connect(NATS_URL).await {
-                        let mut subscriber = match client.subscribe(EOS_CTL).await {
-                            Ok(sub) => sub,
+                    // Remove existing socket if it exists
+                    let _ = tokio::fs::remove_file(RPC_SOCKET).await;
+
+                    let listener =
+                        match tarpc::serde_transport::unix::listen(RPC_SOCKET, Bincode::default)
+                            .await
+                        {
+                            Ok(l) => l,
                             Err(e) => {
-                                log::error!("Failed to subscribe to {}: {}", EOS_CTL, e);
+                                log::error!("Failed to create RPC listener: {}", e);
                                 return;
                             }
                         };
-                        spawn(async move {
-                            while let Some(message) = subscriber.next().await {
-                                match serde_json::from_slice::<common::Request>(&message.payload) {
-                                    Ok(Request { session_id, cmd }) => {
-                                        let response = match cmd {
-                                            common::Command::Shutdown => {
-                                                if let Err(e) =
-                                                    respond(&client, session_id, Response::Done)
-                                                        .await
-                                                {
-                                                    log::error!(
-                                                        "Failed to respond to shutdown command: {}",
-                                                        e
-                                                    );
-                                                }
 
-                                                if let Err(e) = nix::sys::signal::kill(
-                                                    nix::unistd::getpid(),
-                                                    nix::sys::signal::Signal::SIGTERM,
-                                                ) {
-                                                    log::error!("Failed to send SIGTERM: {}", e);
-                                                }
-                                                std::process::exit(0);
-                                            }
-                                            common::Command::Rename { old, new } => {
-                                                let mut sys = sys.write().await;
-                                                if sys.actors.contains_key(&new) {
-                                                    Response::Failed {
-                                                        err: s!(
-                                                            "Actor with the same id already exists"
-                                                        ),
-                                                    }
-                                                } else {
-                                                    if let Some(actor) = sys.actors.remove(&old) {
-                                                        sys.actors.insert(new, actor);
-                                                    }
-                                                    Response::Done
-                                                }
-                                            }
-                                            common::Command::Kill { ids } => {
-                                                let mut sys = sys.write().await;
-                                                for id in ids {
-                                                    if let Err(err) = sys.kill_actor(&id).await {
-                                                        log::error!(
-                                                            "Failed to kill actor {}: {}",
-                                                            id,
-                                                            err
-                                                        );
-                                                    }
-                                                }
-                                                Response::Done
-                                            }
-                                            common::Command::Pause { id } => {
-                                                let mut sys = sys.write().await;
-                                                if let Some(id) = id
-                                                    && let Some(actor) = sys.actors.get_mut(&id)
-                                                {
-                                                    actor.paused = true;
-                                                } else {
-                                                    sys.paused = true;
-                                                }
-                                                Response::Done
-                                            }
-                                            common::Command::Unpause { id } => {
-                                                let mut sys = sys.write().await;
-                                                if let Some(id) = id
-                                                    && let Some(actor) = sys.actors.get_mut(&id)
-                                                {
-                                                    actor.paused = false;
-                                                } else {
-                                                    sys.paused = false;
-                                                }
-                                                Response::Done
-                                            }
-                                            common::Command::Send(msg) => {
-                                                let mut sys = sys.write().await;
-                                                if let Some(actor) = sys.actors.get_mut(&msg.to) {
-                                                    actor.mailbox.push_back(dbg!(msg));
-                                                }
-                                                Response::Done
-                                            }
-                                            common::Command::Tick => {
-                                                let mut sys = sys.write().await;
-                                                match sys.tick().await {
-                                                    Ok(()) => Response::Done,
-                                                    Err(err) => Response::Failed {
-                                                        err: err.to_string(),
-                                                    },
-                                                }
-                                            }
-                                            common::Command::SetTick { tick } => {
-                                                let mut config = config.write().await;
-                                                config.tick = tick;
-                                                Response::Done
-                                            }
-                                            common::Command::ResetTick => {
-                                                let mut config = config.write().await;
-                                                config.tick = DEFAULT_TICK;
-                                                Response::Done
-                                            }
-                                            common::Command::Spawn { props } => {
-                                                match sys.write().await.spawn_actor(props).await {
-                                                    Ok(id) => {
-                                                        _ = teleplot("system.actor.spawned:1");
-                                                        Response::Spawned { id }
-                                                    }
-                                                    Err(err) => Response::Failed {
-                                                        err: err.to_string(),
-                                                    },
-                                                }
-                                            }
-                                            common::Command::List => {
-                                                let actors = sys
-                                                    .read()
-                                                    .await
-                                                    .actors
-                                                    .keys()
-                                                    .cloned()
-                                                    .collect::<Vec<_>>();
-                                                Response::Actors { actors }
-                                            }
-                                        };
-                                        if let Err(e) = respond(&client, session_id, response).await
-                                        {
-                                            log::error!("Failed to send response: {}", e);
-                                        }
-                                    }
-                                    Err(e) => log::error!("Invalid message format: {e}"),
-                                };
+                    log::info!("RPC server listening on {}", RPC_SOCKET);
+
+                    let server = EosServer {
+                        config: config_clone,
+                        sys: sys_clone,
+                    };
+
+                    let mut listener = listener;
+                    while let Some(Ok(transport)) = listener.next().await {
+                        let server = server.clone();
+                        spawn(async move {
+                            let channel = server::BaseChannel::with_defaults(transport);
+                            let mut requests = Box::pin(channel.execute(server.serve()));
+                            while let Some(request_fut) = requests.next().await {
+                                spawn(request_fut);
                             }
                         });
                     }
@@ -613,6 +583,7 @@ async fn main() -> anyhow::Result<()> {
 
             {
                 let sys = sys.clone();
+                let config = config.clone();
                 spawn(async move {
                     loop {
                         let tick = config.read().await.tick;

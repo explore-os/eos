@@ -1,8 +1,3 @@
-FROM mcr.microsoft.com/vscode/devcontainers/go AS go
-
-RUN go install github.com/nats-io/natscli/nats@latest
-RUN cp "$(which nats)" /
-
 FROM lukemathwalker/cargo-chef:latest-rust-1 AS chef
 WORKDIR /app
 
@@ -27,7 +22,6 @@ RUN apt-get update && \
 WORKDIR /app
 COPY --from=builder /app/target/release/eos /usr/local/bin
 COPY --from=builder /app/target/release/setup /
-COPY --from=go /nats /usr/local/bin
 
 RUN mkdir /ext
 COPY teleplot-eos.vsix /ext/teleplot-eos.vsix
