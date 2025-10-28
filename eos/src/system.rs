@@ -8,10 +8,7 @@ use std::{
     sync::Arc,
 };
 
-use crate::{
-    client,
-    common::{Message, Props, SYSTEM, teleplot},
-};
+use crate::common::{Message, Props, SYSTEM, teleplot};
 use bytes::Bytes;
 use lazy_static::lazy_static;
 use nanoid::nanoid;

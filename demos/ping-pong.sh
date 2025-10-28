@@ -1,9 +1,11 @@
 #!/bin/bash
 
+SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+
 ping_actor="/explore/actors/ping"
 pong_actor="/explore/actors/pong"
 
-actor_script="/explore/examples/ping-pong.rn"
+actor_script="$SCRIPT_DIR/../examples/ping-pong.rn"
 
 eos spawn --id ping "$actor_script"
 eos spawn --id pong "$actor_script"

@@ -5,7 +5,6 @@ edition = "2024"
 
 [dependencies]
 anyhow = "1.0.100"
-tarpc = { version = "0.34", features = ["tokio1", "serde1", "serde-transport", "serde-transport-bincode", "unix"] }
 clap = { version = "4.5.49", features = ["derive"] }
 clap_complete = { version = "4.5.59", optional = true }
 nanoid = "0.4.0"
@@ -28,11 +27,11 @@ tokio-stream = { version = "0.1.14", features = ["io-util"] }
 rs9p = "0.11.0"
 async-trait = "0.1.89"
 thiserror = "2.0.17"
-fern = {version = "0.7.1", features = ["date-based"]}
-humantime = "2.3.0"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2.3"
+axum = "0.8.6"
+reqwest = { version = "0.12.24", features = ["json"] }
 
 [features]
 docker = []

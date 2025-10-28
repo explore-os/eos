@@ -19,7 +19,7 @@ pub mod dirs {
 }
 pub const KILL_FILE: &str = "/tmp/eos_kill";
 pub const EOS_SOCKET: &str = "/tmp/eos:0";
-pub const RPC_SOCKET: &str = "/tmp/eos_rpc:0";
+pub const RPC_PORT: u16 = 9097;
 pub const DEFAULT_TICK: u64 = 2000;
 
 #[cfg(feature = "docker")]
@@ -41,21 +41,6 @@ pub enum Response {
     Failed { err: String },
     Spawned { id: String },
     Actors { actors: Vec<String> },
-}
-
-#[tarpc::service]
-pub trait EosService {
-    async fn spawn(props: Props) -> Response;
-    async fn list() -> Response;
-    async fn send(message: Message) -> Response;
-    async fn pause(id: Option<String>) -> Response;
-    async fn unpause(id: Option<String>) -> Response;
-    async fn tick() -> Response;
-    async fn set_tick(tick: u64) -> Response;
-    async fn reset_tick() -> Response;
-    async fn rename(old: String, new: String) -> Response;
-    async fn kill(ids: Vec<String>) -> Response;
-    async fn shutdown() -> Response;
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]

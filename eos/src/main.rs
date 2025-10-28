@@ -2,15 +2,14 @@ use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use anyhow::bail;
 
+use axum::{Json, Router, extract::State, routing::post};
 #[cfg(feature = "_setup")]
 use clap::Command;
 use clap::{Parser, Subcommand};
-use common::{EosServiceClient, Message, Props, Response};
-use futures::future;
-use futures_util::StreamExt;
+use common::{Message, Props, Response};
 
+use serde::Serialize;
 use stringlit::s;
-use tarpc::{client, context, tokio_serde::formats::Bincode};
 
 #[cfg(feature = "_setup")]
 use clap_complete::{aot::Fish, generate_to};
@@ -19,7 +18,7 @@ use tokio::sync::RwLock;
 
 use crate::{
     common::{
-        DEFAULT_TICK, EOS_SOCKET, KILL_FILE, RPC_SOCKET,
+        DEFAULT_TICK, EOS_SOCKET, KILL_FILE, RPC_PORT,
         dirs::{LOGS, STORAGE},
         root, teleplot,
     },
@@ -58,12 +57,12 @@ enum SockType {
 #[derive(Subcommand)]
 enum Action {
     Root,
-    Sock {
-        #[command(subcommand)]
-        sock_type: SockType,
-    },
+    Sock,
     Shutdown,
-    Serve,
+    Serve {
+        #[arg(short, long)]
+        mount: bool,
+    },
     /// spawn an actor
     Spawn {
         /// the requested id for the actor
@@ -117,6 +116,12 @@ enum Action {
     },
 }
 
+impl Action {
+    pub fn is_serve(&self) -> bool {
+        matches!(self, Action::Serve { .. })
+    }
+}
+
 #[derive(Subcommand)]
 enum DbCommand {
     /// store a value in an actors kv-store
@@ -161,49 +166,196 @@ enum TickCommand {
     Now,
 }
 
-async fn handle_response(_client: EosServiceClient, response: Response) {
-    match response {
-        Response::Done => {
-            println!("Command executed successfully");
-        }
-        Response::Actors { actors } => {
-            println!("Actors: {:?}", actors);
-        }
-        Response::Spawned { id } => {
-            println!("Actor spawned with id: {id}");
-        }
-        Response::Failed { err } => {
-            eprintln!("Failed: {err}")
-        }
-    }
+#[derive(Clone)]
+struct AppState {
+    config: Arc<RwLock<Config>>,
+    sys: Arc<RwLock<System>>,
 }
 
-async fn spawn_actor(client: EosServiceClient, props: Props) -> anyhow::Result<()> {
-    let response = client.spawn(context::current(), props).await?;
-    handle_response(client, response).await;
+async fn spawn(State(state): State<Arc<AppState>>, Json(props): Json<Props>) -> Json<Response> {
+    Json(match state.sys.write().await.spawn_actor(props).await {
+        Ok(id) => {
+            _ = teleplot("system.actor.spawned:1");
+            Response::Spawned { id }
+        }
+        Err(err) => Response::Failed {
+            err: err.to_string(),
+        },
+    })
+}
+
+async fn list(State(state): State<Arc<AppState>>) -> Json<Response> {
+    let actors = state
+        .sys
+        .read()
+        .await
+        .actors
+        .keys()
+        .cloned()
+        .collect::<Vec<_>>();
+    Json(Response::Actors { actors })
+}
+
+async fn send(State(state): State<Arc<AppState>>, Json(msg): Json<Message>) -> Json<Response> {
+    let mut sys = state.sys.write().await;
+    if let Some(actor) = sys.actors.get_mut(&msg.to) {
+        actor.mailbox.push_back(msg);
+    }
+    Json(Response::Done)
+}
+
+async fn pause(
+    State(state): State<Arc<AppState>>,
+    Json(id): Json<Option<String>>,
+) -> Json<Response> {
+    let mut sys = state.sys.write().await;
+    if let Some(id) = id
+        && let Some(actor) = sys.actors.get_mut(&id)
+    {
+        actor.paused = true;
+    } else {
+        sys.paused = true;
+    }
+    Json(Response::Done)
+}
+
+async fn unpause(
+    State(state): State<Arc<AppState>>,
+    Json(id): Json<Option<String>>,
+) -> Json<Response> {
+    let mut sys = state.sys.write().await;
+    if let Some(id) = id
+        && let Some(actor) = sys.actors.get_mut(&id)
+    {
+        actor.paused = false;
+    } else {
+        sys.paused = false;
+    }
+    Json(Response::Done)
+}
+
+async fn tick(State(state): State<Arc<AppState>>) -> Json<Response> {
+    let mut sys = state.sys.write().await;
+    Json(match sys.tick().await {
+        Ok(()) => Response::Done,
+        Err(err) => Response::Failed {
+            err: err.to_string(),
+        },
+    })
+}
+
+async fn set_tick(State(state): State<Arc<AppState>>, Json(tick): Json<u64>) -> Json<Response> {
+    let mut config = state.config.write().await;
+    config.tick = tick;
+    Json(Response::Done)
+}
+
+async fn reset_tick(State(state): State<Arc<AppState>>) -> Json<Response> {
+    let mut config = state.config.write().await;
+    config.tick = DEFAULT_TICK;
+    Json(Response::Done)
+}
+
+// async fn rename(
+//     State(state): State<Arc<AppState>>,
+//     old: String,
+//     new: String,
+// ) -> Response {
+//     let mut sys = state.sys.write().await;
+//     if sys.actors.contains_key(&new) {
+//         Response::Failed {
+//             err: s!("Actor with the same id already exists"),
+//         }
+//     } else {
+//         if let Some(actor) = sys.actors.remove(&old) {
+//             sys.actors.insert(new, actor);
+//         }
+//         Response::Done
+//     }
+// }
+
+async fn kill(State(state): State<Arc<AppState>>, Json(ids): Json<Vec<String>>) -> Json<Response> {
+    let mut sys = state.sys.write().await;
+    for id in ids {
+        if let Err(err) = sys.kill_actor(&id).await {
+            tracing::error!("Failed to kill actor {}: {}", id, err);
+        }
+    }
+    Json(Response::Done)
+}
+
+async fn shutdown() -> Json<Response> {
+    tokio::spawn(async {
+        tokio::time::sleep(Duration::from_millis(2000)).await;
+        if let Err(e) =
+            nix::sys::signal::kill(nix::unistd::getpid(), nix::sys::signal::Signal::SIGTERM)
+        {
+            tracing::error!("Failed to send SIGTERM: {}", e);
+        }
+        std::process::exit(0);
+    });
+    Json(Response::Done)
+}
+
+async fn rpc0(endpoint: &str) -> anyhow::Result<()> {
+    let client = reqwest::Client::new();
+    let response: Response = serde_json::from_str(
+        &client
+            .post(format!("http://localhost:{RPC_PORT}/{endpoint}"))
+            .send()
+            .await?
+            .text()
+            .await?,
+    )?;
+
+    match response {
+        Response::Done => {
+            tracing::info!("Command executed successfully");
+        }
+        Response::Actors { actors } => {
+            tracing::info!("Actors: {:?}", actors);
+        }
+        Response::Spawned { id } => {
+            tracing::info!("Actor spawned with id: {id}");
+        }
+        Response::Failed { err } => {
+            tracing::error!("Failed: {err}")
+        }
+    }
     Ok(())
 }
 
-async fn list(client: EosServiceClient) -> anyhow::Result<()> {
-    let response = client.list(context::current()).await?;
-    handle_response(client, response).await;
+async fn rpc<T: Serialize>(endpoint: &str, data: &T) -> anyhow::Result<()> {
+    let client = reqwest::Client::new();
+    let response: Response = serde_json::from_str(
+        &client
+            .post(format!("http://localhost:{RPC_PORT}/{endpoint}"))
+            .json(data)
+            .send()
+            .await?
+            .text()
+            .await?,
+    )?;
+
+    match response {
+        Response::Done => {
+            tracing::info!("Command executed successfully");
+        }
+        Response::Actors { actors } => {
+            tracing::info!("Actors: {:?}", actors);
+        }
+        Response::Spawned { id } => {
+            tracing::info!("Actor spawned with id: {id}");
+        }
+        Response::Failed { err } => {
+            tracing::error!("Failed: {err}")
+        }
+    }
     Ok(())
 }
 
 struct Config {
     tick: u64,
-}
-
-async fn client() -> anyhow::Result<EosServiceClient> {
-    let mut transport = tarpc::serde_transport::unix::connect(RPC_SOCKET, Bincode::default);
-    transport.config_mut().max_frame_length(usize::MAX);
-    Ok(EosServiceClient::new(client::Config::default(), transport.await?).spawn())
-}
-
-async fn send_shutdown(client: EosServiceClient) -> anyhow::Result<()> {
-    let response = client.shutdown(context::current()).await?;
-    handle_response(client, response).await;
-    Ok(())
 }
 
 struct OptionDropper<T>(Option<T>);
@@ -233,7 +385,7 @@ async fn main() -> anyhow::Result<()> {
 
     let Cli { command } = Cli::parse();
 
-    let _log_guard = if let Action::Serve = &command {
+    let _log_guard = if command.is_serve() {
         let logs = root().join(LOGS);
         if !std::fs::exists(&logs)? {
             std::fs::create_dir_all(logs)?;
@@ -290,13 +442,9 @@ async fn main() -> anyhow::Result<()> {
                 shellexpand::full(&script.display().to_string())?.to_string(),
             ))
             .await?;
-            let client = client().await?;
-            spawn_actor(client, Props { id, script }).await?;
+            rpc("spawn", &Props { id, script }).await?;
         }
-        Action::List => {
-            let client = client().await?;
-            list(client).await?;
-        }
+        Action::List => rpc0("list").await?,
         Action::Send { path, msg, sender } => {
             let id = path
                 .file_name()
@@ -310,12 +458,10 @@ async fn main() -> anyhow::Result<()> {
                 to: id,
                 payload: serde_json::from_str(&msg)?,
             };
-            let client = client().await?;
-            let response = client.send(context::current(), msg).await?;
-            handle_response(client, response).await;
+            rpc("send", &msg).await?;
         }
         Action::Kill { paths } => {
-            let ids: Result<Vec<_>, _> = paths
+            let ids: Result<Vec<String>, _> = paths
                 .iter()
                 .map(|p| {
                     p.file_name()
@@ -324,9 +470,7 @@ async fn main() -> anyhow::Result<()> {
                 })
                 .collect();
 
-            let client = client().await?;
-            let response = client.kill(context::current(), ids?).await?;
-            handle_response(client, response).await;
+            rpc("kill", &ids?).await?;
         }
         Action::Pause { path } => {
             let id = match path {
@@ -339,9 +483,7 @@ async fn main() -> anyhow::Result<()> {
                 None => None,
             };
 
-            let client = client().await?;
-            let response = client.pause(context::current(), id).await?;
-            handle_response(client, response).await;
+            rpc("pause", &id).await?;
         }
         Action::Unpause { path } => {
             let id = match path {
@@ -354,45 +496,29 @@ async fn main() -> anyhow::Result<()> {
                 None => None,
             };
 
-            let client = client().await?;
-            let response = client.unpause(context::current(), id).await?;
-            handle_response(client, response).await;
+            rpc("unpause", &id).await?;
         }
-        Action::Tick { command } => {
-            let client = client().await?;
-            match command {
-                TickCommand::Now => {
-                    let response = client.tick(context::current()).await?;
-                    handle_response(client, response).await;
-                }
-                TickCommand::Reset => {
-                    let response = client.reset_tick(context::current()).await?;
-                    handle_response(client, response).await;
-                }
-                TickCommand::Set { milliseconds } => {
-                    let response = client.set_tick(context::current(), milliseconds).await?;
-                    handle_response(client, response).await;
-                }
+        Action::Tick { command } => match command {
+            TickCommand::Now => {
+                rpc0("tick/now").await?;
             }
-        }
+            TickCommand::Reset => {
+                rpc0("tick/reset").await?;
+            }
+            TickCommand::Set { milliseconds } => {
+                rpc("tick/set", &milliseconds).await?;
+            }
+        },
         Action::Plot { value } => {
             common::teleplot(&value)?;
         }
-        Action::Sock {
-            sock_type: SockType::Mount,
-        } => {
+        Action::Sock => {
             print!("{EOS_SOCKET}");
         }
-        Action::Sock {
-            sock_type: SockType::Rpc,
-        } => {
-            print!("{RPC_SOCKET}");
-        }
         Action::Shutdown => {
-            let client = client().await?;
-            send_shutdown(client).await?;
+            rpc0("shutdown").await?;
         }
-        Action::Serve => {
+        Action::Serve { mount } => {
             tokio::spawn(async {
                 tokio::signal::ctrl_c().await.unwrap();
                 std::process::exit(0);
@@ -428,6 +554,8 @@ async fn main() -> anyhow::Result<()> {
             }
 
             {
+                // Remove existing socket if it exists
+                let _ = tokio::fs::remove_file(EOS_SOCKET).await;
                 let sys = sys.clone();
                 tokio::spawn(async move {
                     srv_async_unix(FsOverlay::new(sys), EOS_SOCKET)
@@ -437,203 +565,66 @@ async fn main() -> anyhow::Result<()> {
                 });
             }
 
-            tokio::spawn(async {
-                loop {
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                    match tokio::fs::try_exists(EOS_SOCKET).await {
-                        Ok(true) => {
-                            match tokio::process::Command::new("sudo")
-                                .arg("mount")
-                                .arg("-t")
-                                .arg("9p")
-                                .arg("-o")
-                                .arg(format!(
-                                    "version=9p2000.L,trans=unix,uname={}",
-                                    std::env::var("USER").unwrap_or_else(|_| s!("vscode"))
-                                ))
-                                .arg(EOS_SOCKET)
-                                .arg("/explore/system")
-                                .spawn()
-                            {
-                                Ok(_) => tracing::info!("Successfully mounted 9p filesystem"),
-                                Err(e) => tracing::error!("Failed to mount 9p filesystem: {}", e),
+            if mount {
+                tokio::spawn(async {
+                    loop {
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                        match tokio::fs::try_exists(EOS_SOCKET).await {
+                            Ok(true) => {
+                                match tokio::process::Command::new("sudo")
+                                    .arg("mount")
+                                    .arg("-t")
+                                    .arg("9p")
+                                    .arg("-o")
+                                    .arg(format!(
+                                        "version=9p2000.L,trans=unix,uname={}",
+                                        std::env::var("USER").unwrap_or_else(|_| s!("vscode"))
+                                    ))
+                                    .arg(EOS_SOCKET)
+                                    .arg("/explore/system")
+                                    .spawn()
+                                {
+                                    Ok(_) => tracing::info!("Successfully mounted 9p filesystem"),
+                                    Err(e) => {
+                                        tracing::error!("Failed to mount 9p filesystem: {}", e)
+                                    }
+                                }
+                                break;
                             }
-                            break;
-                        }
-                        Ok(false) => continue,
-                        Err(e) => {
-                            tracing::error!("Failed to check if {} exists: {}", EOS_SOCKET, e);
-                            tokio::time::sleep(Duration::from_secs(1)).await;
+                            Ok(false) => continue,
+                            Err(e) => {
+                                tracing::error!("Failed to check if {} exists: {}", EOS_SOCKET, e);
+                                tokio::time::sleep(Duration::from_secs(1)).await;
+                            }
                         }
                     }
-                }
-            });
+                });
+            }
 
-            // Start RPC server
             {
-                use common::EosService;
-                use tarpc::server::{self, Channel};
+                let state = Arc::new(AppState {
+                    config: config.clone(),
+                    sys: sys.clone(),
+                });
 
-                #[derive(Clone)]
-                struct EosServer {
-                    config: Arc<RwLock<Config>>,
-                    sys: Arc<RwLock<System>>,
-                }
+                let app = Router::new()
+                    .route("/spawn", post(spawn))
+                    .route("/send", post(send))
+                    .route("/pause", post(pause))
+                    .route("/unpause", post(unpause))
+                    .route("/tick/now", post(tick))
+                    .route("/tick/reset", post(reset_tick))
+                    .route("/tick/set", post(set_tick))
+                    .route("/list", post(list))
+                    .route("/kill", post(kill))
+                    .route("/shutdown", post(shutdown))
+                    .with_state(state);
 
-                impl EosService for EosServer {
-                    async fn spawn(self, _: context::Context, props: Props) -> Response {
-                        match self.sys.write().await.spawn_actor(props).await {
-                            Ok(id) => {
-                                _ = teleplot("system.actor.spawned:1");
-                                Response::Spawned { id }
-                            }
-                            Err(err) => Response::Failed {
-                                err: err.to_string(),
-                            },
-                        }
-                    }
-
-                    async fn list(self, _: context::Context) -> Response {
-                        let actors = self
-                            .sys
-                            .read()
-                            .await
-                            .actors
-                            .keys()
-                            .cloned()
-                            .collect::<Vec<_>>();
-                        Response::Actors { actors }
-                    }
-
-                    async fn send(self, _: context::Context, msg: Message) -> Response {
-                        let mut sys = self.sys.write().await;
-                        if let Some(actor) = sys.actors.get_mut(&msg.to) {
-                            actor.mailbox.push_back(dbg!(msg));
-                        }
-                        Response::Done
-                    }
-
-                    async fn pause(self, _: context::Context, id: Option<String>) -> Response {
-                        let mut sys = self.sys.write().await;
-                        if let Some(id) = id
-                            && let Some(actor) = sys.actors.get_mut(&id)
-                        {
-                            actor.paused = true;
-                        } else {
-                            sys.paused = true;
-                        }
-                        Response::Done
-                    }
-
-                    async fn unpause(self, _: context::Context, id: Option<String>) -> Response {
-                        let mut sys = self.sys.write().await;
-                        if let Some(id) = id
-                            && let Some(actor) = sys.actors.get_mut(&id)
-                        {
-                            actor.paused = false;
-                        } else {
-                            sys.paused = false;
-                        }
-                        Response::Done
-                    }
-
-                    async fn tick(self, _: context::Context) -> Response {
-                        let mut sys = self.sys.write().await;
-                        match sys.tick().await {
-                            Ok(()) => Response::Done,
-                            Err(err) => Response::Failed {
-                                err: err.to_string(),
-                            },
-                        }
-                    }
-
-                    async fn set_tick(self, _: context::Context, tick: u64) -> Response {
-                        let mut config = self.config.write().await;
-                        config.tick = tick;
-                        Response::Done
-                    }
-
-                    async fn reset_tick(self, _: context::Context) -> Response {
-                        let mut config = self.config.write().await;
-                        config.tick = DEFAULT_TICK;
-                        Response::Done
-                    }
-
-                    async fn rename(
-                        self,
-                        _: context::Context,
-                        old: String,
-                        new: String,
-                    ) -> Response {
-                        let mut sys = self.sys.write().await;
-                        if sys.actors.contains_key(&new) {
-                            Response::Failed {
-                                err: s!("Actor with the same id already exists"),
-                            }
-                        } else {
-                            if let Some(actor) = sys.actors.remove(&old) {
-                                sys.actors.insert(new, actor);
-                            }
-                            Response::Done
-                        }
-                    }
-
-                    async fn kill(self, _: context::Context, ids: Vec<String>) -> Response {
-                        let mut sys = self.sys.write().await;
-                        for id in ids {
-                            if let Err(err) = sys.kill_actor(&id).await {
-                                tracing::error!("Failed to kill actor {}: {}", id, err);
-                            }
-                        }
-                        Response::Done
-                    }
-
-                    async fn shutdown(self, _: context::Context) -> Response {
-                        if let Err(e) = nix::sys::signal::kill(
-                            nix::unistd::getpid(),
-                            nix::sys::signal::Signal::SIGTERM,
-                        ) {
-                            tracing::error!("Failed to send SIGTERM: {}", e);
-                        }
-                        std::process::exit(0);
-                    }
-                }
-
-                async fn spawn(fut: impl Future<Output = ()> + Send + 'static) {
-                    tokio::spawn(fut);
-                }
-
-                // Remove existing socket if it exists
-                let _ = tokio::fs::remove_file(RPC_SOCKET).await;
-
-                tracing::info!("RPC server listening on {}", RPC_SOCKET);
-
-                let mut listener = match tarpc::serde_transport::unix::listen(
-                    RPC_SOCKET,
-                    Bincode::default,
-                )
-                .await
-                {
-                    Ok(l) => l,
-                    Err(e) => {
-                        tracing::error!("Failed to create RPC listener: {}", e);
-                        return Ok(());
-                    }
-                };
-                listener.config_mut().max_frame_length(usize::MAX);
-                listener
-                    // Ignore accept errors.
-                    .filter_map(|r| future::ready(r.ok()))
-                    .map(server::BaseChannel::with_defaults)
-                    .map(|channel| {
-                        let server = EosServer {
-                            config: config.clone(),
-                            sys: sys.clone(),
-                        };
-                        channel.execute(server.serve()).for_each(spawn)
-                    })
-                    .for_each(|_| async {})
-                    .await;
+                tracing::info!("RPC server listening on port {}", RPC_PORT);
+                let listener = tokio::net::TcpListener::bind(format!("localhost:{}", RPC_PORT))
+                    .await
+                    .unwrap();
+                axum::serve(listener, app).await.unwrap();
             }
         }
     }
