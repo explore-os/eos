@@ -26,7 +26,7 @@
 //!
 //! ```bash
 //! # Using 9pfuse (if available)
-//! 9pfuse 'unix!/tmp/eos-operator:0' /mnt/eos
+//! 9pfuse 'unix!/tmp/eos:0' /mnt/eos
 //!
 //! # Read actor state
 //! ls /mnt/eos/actors

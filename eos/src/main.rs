@@ -53,9 +53,18 @@ impl Cli {
 }
 
 #[derive(Subcommand)]
+enum SockType {
+    Mount,
+    Rpc,
+}
+
+#[derive(Subcommand)]
 enum Action {
     Root,
-    Sock,
+    Sock {
+        #[command(subcommand)]
+        sock_type: SockType,
+    },
     Shutdown,
     Serve,
     /// spawn an actor
@@ -220,7 +229,7 @@ fn cli_logger() -> Result<(), fern::InitError> {
                 message
             ))
         })
-        .level(log::LevelFilter::Debug)
+        .level(log::LevelFilter::Info)
         .chain(std::io::stdout())
         .apply()?;
     Ok(())
@@ -398,8 +407,15 @@ async fn main() -> anyhow::Result<()> {
         Action::Plot { value } => {
             common::teleplot(&value)?;
         }
-        Action::Sock => {
+        Action::Sock {
+            sock_type: SockType::Mount,
+        } => {
             print!("{EOS_SOCKET}");
+        }
+        Action::Sock {
+            sock_type: SockType::Rpc,
+        } => {
+            print!("{RPC_SOCKET}");
         }
         Action::Shutdown => {
             let client = client().await?;

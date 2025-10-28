@@ -25,7 +25,7 @@ EOS exposes its internal actor system state through a 9P2000.L filesystem interf
 Using a 9P client (e.g., `9pfuse`):
 
 ```bash
-9pfuse 'unix!/tmp/eos-operator:0' /mnt/eos
+9pfuse 'unix!/tmp/eos:0' /mnt/eos
 ```
 
 ### Read Operations
@@ -141,7 +141,7 @@ EOF
 
 ```bash
 # Mount the filesystem
-9pfuse 'unix!/tmp/eos-operator:0' /mnt/eos
+9pfuse 'unix!/tmp/eos:0' /mnt/eos
 
 # List all actors
 ls /mnt/eos/actors
