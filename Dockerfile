@@ -48,4 +48,4 @@ RUN chown -R vscode:vscode /explore
 WORKDIR /explore
 
 ENTRYPOINT ["/docker-entrypoint.sh"]
-CMD ["/usr/local/bin/eos", "serve", "/explore/systea"]
+CMD ["/usr/local/bin/eos", "serve", "/explore/system"]
