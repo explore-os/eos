@@ -14,7 +14,6 @@
 //! └── actors/           # Directory of all actors
 //!     └── {actor_id}/   # Directory for each actor
 //!         ├── mailbox   # Actor's incoming message queue (writable)
-//!         ├── send_queue # Actor's outgoing message queue (read-only)
 //!         ├── script    # Path to actor's script (read-only)
 //!         ├── state     # Actor's current state in JSON (writable)
 //!         └── paused    # Actor's paused state as boolean (writable)
@@ -763,10 +762,6 @@ impl FsOverlay {
                                 let content = self.format_mailbox(actor);
                                 Ok((true, false, content.len() as u64))
                             }
-                            "send_queue" => {
-                                let content = self.format_send_queue(actor);
-                                Ok((true, false, content.len() as u64))
-                            }
                             "script" => Ok((true, false, actor.script.len() as u64)),
                             "state" => {
                                 let content =
@@ -829,11 +824,6 @@ impl FsOverlay {
                                     "mailbox".to_string(),
                                     false,
                                     self.format_mailbox(actor).len() as u64,
-                                ),
-                                (
-                                    "send_queue".to_string(),
-                                    false,
-                                    self.format_send_queue(actor).len() as u64,
                                 ),
                                 ("script".to_string(), false, actor.script.len() as u64),
                                 (
@@ -934,9 +924,6 @@ impl FsOverlay {
                         if let Some(actor) = sys.actors.get(actor_id) {
                             match parts[1] {
                                 "mailbox" => return Ok(self.format_mailbox(actor).into_bytes()),
-                                "send_queue" => {
-                                    return Ok(self.format_send_queue(actor).into_bytes());
-                                }
                                 "script" => {
                                     return Ok(actor.script.clone().into_bytes());
                                 }
@@ -1042,13 +1029,5 @@ impl FsOverlay {
     /// incoming message queue with sender, recipient, and payload details.
     fn format_mailbox(&self, actor: &crate::system::Actor) -> String {
         serde_json::to_string_pretty(&actor.mailbox).unwrap_or_else(|_| s!("[]"))
-    }
-
-    /// Format an actor's send queue as human-readable text
-    ///
-    /// Returns a formatted string showing all messages in the actor's
-    /// outgoing message queue with sender, recipient, and payload details.
-    fn format_send_queue(&self, actor: &crate::system::Actor) -> String {
-        serde_json::to_string_pretty(&actor.send_queue).unwrap_or_else(|_| s!("[]"))
     }
 }

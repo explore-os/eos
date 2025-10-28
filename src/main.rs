@@ -55,22 +55,18 @@ enum SockType {
 }
 
 #[derive(Subcommand)]
-enum PathType {
-    Sock,
-    Mount,
-}
-
-#[derive(Subcommand)]
 enum Action {
+    /// prints the root of the filesystem
     Root,
+    /// shuts down the system
     Shutdown,
+    /// starts the system
     Serve {
+        /// if and where to mount its internal state
         mount: Option<PathBuf>,
     },
-    Path {
-        #[command(subcommand)]
-        command: PathType,
-    },
+    /// prints the path to the socket used by 9p
+    Sock,
     /// spawn an actor
     Spawn {
         /// the requested id for the actor
@@ -119,9 +115,7 @@ enum Action {
         command: DbCommand,
     },
     /// send data to a teleplot instance
-    Plot {
-        value: String,
-    },
+    Plot { value: String },
 }
 
 impl Action {
@@ -520,15 +514,8 @@ async fn main() -> anyhow::Result<()> {
         Action::Plot { value } => {
             common::teleplot(&value)?;
         }
-        Action::Path {
-            command: PathType::Sock,
-        } => {
+        Action::Sock => {
             print!("{EOS_SOCKET}");
-        }
-        Action::Path {
-            command: PathType::Mount,
-        } => {
-            print!("{}", root().join(MOUNT).display());
         }
         Action::Shutdown => {
             rpc0("shutdown").await?;
