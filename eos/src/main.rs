@@ -55,12 +55,20 @@ enum SockType {
 }
 
 #[derive(Subcommand)]
-enum Action {
-    Root,
+enum PathType {
     Sock,
     Mount,
+}
+
+#[derive(Subcommand)]
+enum Action {
+    Root,
     Shutdown,
     Serve,
+    Path {
+        #[command(subcommand)]
+        command: PathType,
+    },
     /// spawn an actor
     Spawn {
         /// the requested id for the actor
@@ -510,10 +518,14 @@ async fn main() -> anyhow::Result<()> {
         Action::Plot { value } => {
             common::teleplot(&value)?;
         }
-        Action::Sock => {
+        Action::Path {
+            command: PathType::Sock,
+        } => {
             print!("{EOS_SOCKET}");
         }
-        Action::Mount => {
+        Action::Path {
+            command: PathType::Mount,
+        } => {
             print!("{}", root().join(MOUNT).display());
         }
         Action::Shutdown => {
