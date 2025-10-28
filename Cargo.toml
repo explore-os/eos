@@ -1,7 +1,16 @@
 [package]
-name = "eos"
+name = "explore-os"
 version = "0.1.0"
 edition = "2024"
+description = "An actor system exposed as filesystem"
+authors = ["hardliner66"]
+license = "MIT OR Apache-2.0"
+repository = "https://github.com/explore-os/eos"
+documentation = "https://docs.rs/explore-os/latest/explore-os/"
+
+[[bin]]
+name = "eos"
+path = "src/main.rs"
 
 [dependencies]
 anyhow = "1.0.100"
