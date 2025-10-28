@@ -406,10 +406,6 @@ async fn main() -> anyhow::Result<()> {
             send_shutdown(&client).await?;
         }
         Action::Serve => {
-            if let Ok(client) = client().await {
-                let _ = send_shutdown(&client).await;
-            }
-            tokio::time::sleep(Duration::from_millis(500)).await;
             let config = Arc::new(RwLock::new(Config { tick: DEFAULT_TICK }));
             let sys = Arc::new(RwLock::new(System::new()));
 
