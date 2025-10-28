@@ -64,7 +64,9 @@ enum PathType {
 enum Action {
     Root,
     Shutdown,
-    Serve,
+    Serve {
+        mount: Option<PathBuf>,
+    },
     Path {
         #[command(subcommand)]
         command: PathType,
@@ -531,7 +533,7 @@ async fn main() -> anyhow::Result<()> {
         Action::Shutdown => {
             rpc0("shutdown").await?;
         }
-        Action::Serve => {
+        Action::Serve { mount } => {
             tokio::spawn(async {
                 tokio::signal::ctrl_c().await.unwrap();
                 std::process::exit(0);
@@ -578,61 +580,64 @@ async fn main() -> anyhow::Result<()> {
                 });
             }
 
-            tokio::spawn(async {
-                loop {
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                    match tokio::fs::try_exists(EOS_SOCKET).await {
-                        Ok(true) => {
-                            let mnt = root().join(MOUNT);
+            if let Some(mount) = mount {
+                tokio::spawn(async move {
+                    loop {
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                        match tokio::fs::try_exists(EOS_SOCKET).await {
+                            Ok(true) => {
+                                let mnt = root().join(MOUNT);
 
-                            for _ in 0..5 {
-                                if let Ok(mut c) = tokio::process::Command::new("sudo")
-                                    .arg("umount")
-                                    .arg(&mnt)
-                                    .spawn()
-                                {
-                                    if let Ok(_) = c.wait().await {
-                                        tracing::info!(
-                                            "Successfully unmounted previous 9p filesystem"
-                                        );
-                                        break;
+                                for _ in 0..5 {
+                                    if let Ok(mut c) = tokio::process::Command::new("sudo")
+                                        .arg("umount")
+                                        .arg(&mount)
+                                        .spawn()
+                                    {
+                                        if let Ok(_) = c.wait().await {
+                                            tracing::info!(
+                                                "Successfully unmounted previous 9p filesystem"
+                                            );
+                                            break;
+                                        }
                                     }
                                 }
-                            }
 
-                            if !tokio::fs::try_exists(&mnt).await.unwrap() {
-                                tokio::fs::create_dir_all(&mnt)
-                                    .await
-                                    .expect("Could not create mnt dir!");
-                            }
-                            match tokio::process::Command::new("sudo")
-                                .arg("mount")
-                                .arg("-t")
-                                .arg("9p")
-                                .arg("-o")
-                                .arg(format!(
-                                    "version=9p2000.L,trans=unix,uname={}",
-                                    std::env::var("USER").unwrap_or_else(|_| s!("vscode"))
-                                ))
-                                .arg(EOS_SOCKET)
-                                .arg(mnt)
-                                .spawn()
-                            {
-                                Ok(_) => tracing::info!("Successfully mounted 9p filesystem"),
-                                Err(e) => {
-                                    tracing::error!("Failed to mount 9p filesystem: {}", e)
+                                if !tokio::fs::try_exists(&mnt).await.unwrap() {
+                                    tokio::fs::create_dir_all(&mnt)
+                                        .await
+                                        .expect("Could not create mnt dir!");
                                 }
+                                tracing::info!("Mounting 9p filesystem utilizing sudo");
+                                match tokio::process::Command::new("sudo")
+                                    .arg("mount")
+                                    .arg("-t")
+                                    .arg("9p")
+                                    .arg("-o")
+                                    .arg(format!(
+                                        "version=9p2000.L,trans=unix,uname={}",
+                                        std::env::var("USER").unwrap_or_else(|_| s!("vscode"))
+                                    ))
+                                    .arg(EOS_SOCKET)
+                                    .arg(mnt)
+                                    .spawn()
+                                {
+                                    Ok(_) => tracing::info!("Successfully mounted 9p filesystem"),
+                                    Err(e) => {
+                                        tracing::error!("Failed to mount 9p filesystem: {}", e)
+                                    }
+                                }
+                                break;
                             }
-                            break;
-                        }
-                        Ok(false) => continue,
-                        Err(e) => {
-                            tracing::error!("Failed to check if {} exists: {}", EOS_SOCKET, e);
-                            tokio::time::sleep(Duration::from_secs(1)).await;
+                            Ok(false) => continue,
+                            Err(e) => {
+                                tracing::error!("Failed to check if {} exists: {}", EOS_SOCKET, e);
+                                tokio::time::sleep(Duration::from_secs(1)).await;
+                            }
                         }
                     }
-                }
-            });
+                });
+            }
 
             {
                 let state = Arc::new(AppState {
