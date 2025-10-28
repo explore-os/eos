@@ -19,7 +19,7 @@ use tokio::sync::RwLock;
 use crate::{
     common::{
         DEFAULT_TICK, EOS_SOCKET, KILL_FILE, RPC_PORT,
-        dirs::{LOGS, STORAGE},
+        dirs::{LOGS, MOUNT, STORAGE},
         root, teleplot,
     },
     file_overlay::FsOverlay,
@@ -58,11 +58,9 @@ enum SockType {
 enum Action {
     Root,
     Sock,
+    Mount,
     Shutdown,
-    Serve {
-        #[arg(short, long)]
-        mount: bool,
-    },
+    Serve,
     /// spawn an actor
     Spawn {
         /// the requested id for the actor
@@ -515,10 +513,13 @@ async fn main() -> anyhow::Result<()> {
         Action::Sock => {
             print!("{EOS_SOCKET}");
         }
+        Action::Mount => {
+            print!("{}", root().join(MOUNT).display());
+        }
         Action::Shutdown => {
             rpc0("shutdown").await?;
         }
-        Action::Serve { mount } => {
+        Action::Serve => {
             tokio::spawn(async {
                 tokio::signal::ctrl_c().await.unwrap();
                 std::process::exit(0);
@@ -565,41 +566,61 @@ async fn main() -> anyhow::Result<()> {
                 });
             }
 
-            if mount {
-                tokio::spawn(async {
-                    loop {
-                        tokio::time::sleep(Duration::from_millis(100)).await;
-                        match tokio::fs::try_exists(EOS_SOCKET).await {
-                            Ok(true) => {
-                                match tokio::process::Command::new("sudo")
-                                    .arg("mount")
-                                    .arg("-t")
-                                    .arg("9p")
-                                    .arg("-o")
-                                    .arg(format!(
-                                        "version=9p2000.L,trans=unix,uname={}",
-                                        std::env::var("USER").unwrap_or_else(|_| s!("vscode"))
-                                    ))
-                                    .arg(EOS_SOCKET)
-                                    .arg("/explore/system")
+            tokio::spawn(async {
+                loop {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    match tokio::fs::try_exists(EOS_SOCKET).await {
+                        Ok(true) => {
+                            let mnt = root().join(MOUNT);
+
+                            for _ in 0..5 {
+                                if let Ok(mut c) = tokio::process::Command::new("sudo")
+                                    .arg("umount")
+                                    .arg(&mnt)
                                     .spawn()
                                 {
-                                    Ok(_) => tracing::info!("Successfully mounted 9p filesystem"),
-                                    Err(e) => {
-                                        tracing::error!("Failed to mount 9p filesystem: {}", e)
+                                    if let Ok(_) = c.wait().await {
+                                        tracing::info!(
+                                            "Successfully unmounted previous 9p filesystem"
+                                        );
+                                        break;
                                     }
                                 }
-                                break;
                             }
-                            Ok(false) => continue,
-                            Err(e) => {
-                                tracing::error!("Failed to check if {} exists: {}", EOS_SOCKET, e);
-                                tokio::time::sleep(Duration::from_secs(1)).await;
+
+                            if !tokio::fs::try_exists(&mnt).await.unwrap() {
+                                tokio::fs::create_dir_all(&mnt)
+                                    .await
+                                    .expect("Could not create mnt dir!");
                             }
+                            match tokio::process::Command::new("sudo")
+                                .arg("mount")
+                                .arg("-t")
+                                .arg("9p")
+                                .arg("-o")
+                                .arg(format!(
+                                    "version=9p2000.L,trans=unix,uname={}",
+                                    std::env::var("USER").unwrap_or_else(|_| s!("vscode"))
+                                ))
+                                .arg(EOS_SOCKET)
+                                .arg(mnt)
+                                .spawn()
+                            {
+                                Ok(_) => tracing::info!("Successfully mounted 9p filesystem"),
+                                Err(e) => {
+                                    tracing::error!("Failed to mount 9p filesystem: {}", e)
+                                }
+                            }
+                            break;
+                        }
+                        Ok(false) => continue,
+                        Err(e) => {
+                            tracing::error!("Failed to check if {} exists: {}", EOS_SOCKET, e);
+                            tokio::time::sleep(Duration::from_secs(1)).await;
                         }
                     }
-                });
-            }
+                }
+            });
 
             {
                 let state = Arc::new(AppState {

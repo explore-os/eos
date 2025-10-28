@@ -16,6 +16,10 @@ lazy_static! {
 pub mod dirs {
     pub const LOGS: &str = "logs";
     pub const STORAGE: &str = "storage";
+    #[cfg(feature = "docker")]
+    pub const MOUNT: &str = "system";
+    #[cfg(not(feature = "docker"))]
+    pub const MOUNT: &str = "eos_mnt";
 }
 pub const KILL_FILE: &str = "/tmp/eos_kill";
 pub const EOS_SOCKET: &str = "/tmp/eos:0";
@@ -26,7 +30,7 @@ pub const DEFAULT_TICK: u64 = 2000;
 const ROOT: &str = "/explore";
 
 #[cfg(not(feature = "docker"))]
-const ROOT: &str = ".";
+const ROOT: &str = "/tmp";
 
 pub fn root() -> PathBuf {
     PathBuf::from(ROOT)

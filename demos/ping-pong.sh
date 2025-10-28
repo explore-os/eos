@@ -2,8 +2,8 @@
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 
-ping_actor="/explore/actors/ping"
-pong_actor="/explore/actors/pong"
+ping_actor="$(eos mount)/actors/ping"
+pong_actor="$(eos mount)/actors/pong"
 
 actor_script="$SCRIPT_DIR/../examples/ping-pong.rn"
 
