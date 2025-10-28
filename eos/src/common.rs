@@ -18,7 +18,7 @@ pub mod dirs {
     pub const STORAGE: &str = "storage";
 }
 pub const EOS_SOCKET: &str = "/tmp/eos:0";
-pub const RPC_SOCKET: &str = "/tmp/eos_rpc.sock";
+pub const RPC_SOCKET: &str = "/tmp/eos_rpc:0";
 pub const DEFAULT_TICK: u64 = 2000;
 
 #[cfg(feature = "docker")]

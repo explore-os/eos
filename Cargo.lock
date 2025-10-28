@@ -343,6 +343,7 @@ dependencies = [
  "clap_complete",
  "fern",
  "flume",
+ "futures",
  "futures-util",
  "humantime",
  "lazy_static",
@@ -361,6 +362,8 @@ dependencies = [
  "thiserror 2.0.17",
  "tokio",
  "tokio-stream",
+ "tracing",
+ "tracing-subscriber",
 ]
 
 [[package]]
@@ -1062,9 +1065,9 @@ checksum = "7a2d987857b319362043e95f5353c0535c1f58eec5336fdfcf626430af7def58"
 
 [[package]]
 name = "rs9p"
-version = "0.9.0"
+version = "0.10.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3a642e6a4c9490f7877fc31a98ebb33afb6c7d5e7aba5b5201ad7a0e75de1f70"
+checksum = "022c2304ef5c1e5a3ced2e8ec958b6afeeb9c6f9c37dc37618fd0da785bf2c58"
 dependencies = [
  "async-trait",
  "bitflags",
@@ -1072,12 +1075,12 @@ dependencies = [
  "bytes",
  "enum_primitive",
  "futures",
- "log",
  "nix",
  "num-traits 0.2.19",
  "tokio",
  "tokio-stream",
  "tokio-util",
+ "tracing",
 ]
 
 [[package]]

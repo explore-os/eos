@@ -45,5 +45,7 @@ RUN mkdir -p /etc/fish/completions && \
 RUN mkdir -p /explore/system
 RUN chown -R vscode:vscode /explore
 
+WORKDIR /explore
+
 ENTRYPOINT ["/docker-entrypoint.sh"]
 CMD ["/usr/local/bin/eos", "serve"]

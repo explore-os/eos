@@ -10,6 +10,7 @@ use anyhow::bail;
 use clap::Command;
 use clap::{Parser, Subcommand};
 use common::{EosServiceClient, Message, Props, Response};
+use futures::future;
 use futures_util::StreamExt;
 
 use stringlit::s;
@@ -18,7 +19,7 @@ use tarpc::{client, context, tokio_serde::formats::Bincode};
 #[cfg(feature = "_setup")]
 use clap_complete::{aot::Fish, generate_to};
 use rs9p::srv::srv_async_unix;
-use tokio::{spawn, sync::RwLock};
+use tokio::sync::RwLock;
 
 use crate::{
     common::{
@@ -213,9 +214,9 @@ struct Config {
 }
 
 async fn client() -> anyhow::Result<EosServiceClient> {
-    let transport = tarpc::serde_transport::unix::connect(RPC_SOCKET, Bincode::default);
-    let transport = transport.await?;
-    Ok(EosServiceClient::new(client::Config::default(), transport).spawn())
+    let mut transport = tarpc::serde_transport::unix::connect(RPC_SOCKET, Bincode::default);
+    transport.config_mut().max_frame_length(usize::MAX);
+    Ok(EosServiceClient::new(client::Config::default(), transport.await?).spawn())
 }
 
 fn cli_logger() -> Result<(), fern::InitError> {
@@ -230,6 +231,7 @@ fn cli_logger() -> Result<(), fern::InitError> {
             ))
         })
         .level(log::LevelFilter::Info)
+        .level_for("tarpc", log::LevelFilter::Error)
         .chain(std::io::stdout())
         .apply()?;
     Ok(())
@@ -248,6 +250,7 @@ fn file_logger() -> Result<(), fern::InitError> {
         })
         .level(log::LevelFilter::Info)
         .level_for("rs9p", log::LevelFilter::Warn)
+        // .level_for("tarpc", log::LevelFilter::Error)
         .chain(std::io::stdout())
         .chain(fern::DateBased::new("/explore/logs/eos.log.", "%Y-%m-%d"))
         .apply()?;
@@ -262,6 +265,8 @@ async fn send_shutdown(client: &EosServiceClient) -> anyhow::Result<()> {
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    tracing_subscriber::fmt::init();
+
     #[cfg(feature = "_setup")]
     {
         let SetupCli { out_dir } = SetupCli::parse();
@@ -325,15 +330,8 @@ async fn main() -> anyhow::Result<()> {
                 .ok_or_else(|| anyhow::anyhow!("Invalid path: no file name found"))?
                 .display()
                 .to_string();
-            let sender = sender.map(|sender| {
-                sender
-                    .file_name()
-                    .map(|name| name.display().to_string())
-                    .unwrap_or_else(|| {
-                        log::warn!("Invalid sender path, using empty string");
-                        String::new()
-                    })
-            });
+            let sender =
+                sender.and_then(|sender| sender.file_name().map(|d| d.display().to_string()));
             let msg = Message {
                 from: sender,
                 to: id,
@@ -424,6 +422,62 @@ async fn main() -> anyhow::Result<()> {
         Action::Serve => {
             let config = Arc::new(RwLock::new(Config { tick: DEFAULT_TICK }));
             let sys = Arc::new(RwLock::new(System::new()));
+
+            {
+                let sys = sys.clone();
+                let config = config.clone();
+                tokio::spawn(async move {
+                    loop {
+                        let tick = config.read().await.tick;
+                        tokio::time::sleep(Duration::from_millis(tick)).await;
+                        if let Err(e) = sys.write().await.tick().await {
+                            tracing::error!("Failed to tick: {e}");
+                        }
+                    }
+                });
+            }
+
+            {
+                let sys = sys.clone();
+                tokio::spawn(async move {
+                    srv_async_unix(FsOverlay::new(sys), EOS_SOCKET)
+                        .await
+                        .unwrap();
+                    std::process::exit(0);
+                });
+            }
+
+            tokio::spawn(async {
+                loop {
+                    tokio::time::sleep(Duration::from_millis(100)).await;
+                    match tokio::fs::try_exists(EOS_SOCKET).await {
+                        Ok(true) => {
+                            match tokio::process::Command::new("sudo")
+                                .arg("mount")
+                                .arg("-t")
+                                .arg("9p")
+                                .arg("-o")
+                                .arg(format!(
+                                    "version=9p2000.L,trans=unix,uname={}",
+                                    std::env::var("USER").unwrap_or_else(|_| s!("vscode"))
+                                ))
+                                .arg(EOS_SOCKET)
+                                .arg("/explore/system")
+                                .spawn()
+                            {
+                                Ok(_) => tracing::info!("Successfully mounted 9p filesystem"),
+                                Err(e) => tracing::error!("Failed to mount 9p filesystem: {}", e),
+                            }
+                            break;
+                        }
+                        Ok(false) => continue,
+                        Err(e) => {
+                            tracing::error!("Failed to check if {} exists: {}", EOS_SOCKET, e);
+                            tokio::time::sleep(Duration::from_secs(1)).await;
+                        }
+                    }
+                }
+            });
 
             // Start RPC server
             {
@@ -538,7 +592,7 @@ async fn main() -> anyhow::Result<()> {
                         let mut sys = self.sys.write().await;
                         for id in ids {
                             if let Err(err) = sys.kill_actor(&id).await {
-                                log::error!("Failed to kill actor {}: {}", id, err);
+                                tracing::error!("Failed to kill actor {}: {}", id, err);
                             }
                         }
                         Response::Done
@@ -549,97 +603,48 @@ async fn main() -> anyhow::Result<()> {
                             nix::unistd::getpid(),
                             nix::sys::signal::Signal::SIGTERM,
                         ) {
-                            log::error!("Failed to send SIGTERM: {}", e);
+                            tracing::error!("Failed to send SIGTERM: {}", e);
                         }
                         std::process::exit(0);
                     }
                 }
 
-                let config_clone = config.clone();
-                let sys_clone = sys.clone();
-                spawn(async move {
-                    // Remove existing socket if it exists
-                    let _ = tokio::fs::remove_file(RPC_SOCKET).await;
-
-                    let listener =
-                        match tarpc::serde_transport::unix::listen(RPC_SOCKET, Bincode::default)
-                            .await
-                        {
-                            Ok(l) => l,
-                            Err(e) => {
-                                log::error!("Failed to create RPC listener: {}", e);
-                                return;
-                            }
-                        };
-
-                    log::info!("RPC server listening on {}", RPC_SOCKET);
-
-                    let server = EosServer {
-                        config: config_clone,
-                        sys: sys_clone,
-                    };
-
-                    let mut listener = listener;
-                    while let Some(Ok(transport)) = listener.next().await {
-                        let server = server.clone();
-                        spawn(async move {
-                            let channel = server::BaseChannel::with_defaults(transport);
-                            let mut requests = Box::pin(channel.execute(server.serve()));
-                            while let Some(request_fut) = requests.next().await {
-                                spawn(request_fut);
-                            }
-                        });
-                    }
-                });
-            }
-
-            {
-                let sys = sys.clone();
-                let config = config.clone();
-                spawn(async move {
-                    loop {
-                        let tick = config.read().await.tick;
-                        tokio::time::sleep(Duration::from_millis(tick)).await;
-                        if let Err(e) = sys.write().await.tick().await {
-                            log::error!("Failed to tick: {e}");
-                        }
-                    }
-                });
-            }
-
-            spawn(async {
-                loop {
-                    tokio::time::sleep(Duration::from_millis(100)).await;
-                    match tokio::fs::try_exists(EOS_SOCKET).await {
-                        Ok(true) => {
-                            match tokio::process::Command::new("sudo")
-                                .arg("mount")
-                                .arg("-t")
-                                .arg("9p")
-                                .arg("-o")
-                                .arg(format!(
-                                    "version=9p2000.L,trans=unix,uname={}",
-                                    std::env::var("USER").unwrap_or_else(|_| s!("vscode"))
-                                ))
-                                .arg(EOS_SOCKET)
-                                .arg("/explore/system")
-                                .spawn()
-                            {
-                                Ok(_) => log::info!("Successfully mounted 9p filesystem"),
-                                Err(e) => log::error!("Failed to mount 9p filesystem: {}", e),
-                            }
-                            break;
-                        }
-                        Ok(false) => continue,
-                        Err(e) => {
-                            log::error!("Failed to check if {} exists: {}", EOS_SOCKET, e);
-                            tokio::time::sleep(Duration::from_secs(1)).await;
-                        }
-                    }
+                async fn spawn(fut: impl Future<Output = ()> + Send + 'static) {
+                    tokio::spawn(fut);
                 }
-            });
 
-            srv_async_unix(FsOverlay::new(sys), EOS_SOCKET).await?;
+                // Remove existing socket if it exists
+                let _ = tokio::fs::remove_file(RPC_SOCKET).await;
+
+                tracing::info!("RPC server listening on {}", RPC_SOCKET);
+
+                let mut listener = match tarpc::serde_transport::unix::listen(
+                    RPC_SOCKET,
+                    Bincode::default,
+                )
+                .await
+                {
+                    Ok(l) => l,
+                    Err(e) => {
+                        tracing::error!("Failed to create RPC listener: {}", e);
+                        return Ok(());
+                    }
+                };
+                listener.config_mut().max_frame_length(usize::MAX);
+                listener
+                    // Ignore accept errors.
+                    .filter_map(|r| future::ready(r.ok()))
+                    .map(server::BaseChannel::with_defaults)
+                    .map(|channel| {
+                        let server = EosServer {
+                            config: config.clone(),
+                            sys: sys.clone(),
+                        };
+                        channel.execute(server.serve()).for_each(spawn)
+                    })
+                    .for_each(|_| async {})
+                    .await;
+            }
         }
     }
     Ok(())

@@ -14,6 +14,7 @@ serde = { version = "1.0.228", features = ["derive"] }
 serde_json = "1.0.145"
 shellexpand = { version = "3.1.1", features = ["full"] }
 tokio = { version = "1.36.0", features = ["full"] }
+futures = "0.3"
 bytes = { version = "1.10.1", features = ["serde"] }
 futures-util = "0.3.31"
 redb = "3.1.0"
@@ -24,11 +25,13 @@ log = "0.4.28"
 signal-hook = "0.3.18"
 stringlit = "2.1.0"
 tokio-stream = { version = "0.1.14", features = ["io-util"] }
-rs9p = "0.9.0"
+rs9p = "0.10.0"
 async-trait = "0.1.89"
 thiserror = "2.0.17"
 fern = {version = "0.7.1", features = ["date-based"]}
 humantime = "2.3.0"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 
 [features]
 docker = []
