@@ -1,8 +1,4 @@
-use std::{
-    path::PathBuf,
-    sync::Arc,
-    time::{Duration, SystemTime},
-};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use anyhow::bail;
 
@@ -23,7 +19,7 @@ use tokio::sync::RwLock;
 
 use crate::{
     common::{
-        DEFAULT_TICK, EOS_SOCKET, RPC_SOCKET,
+        DEFAULT_TICK, EOS_SOCKET, KILL_FILE, RPC_SOCKET,
         dirs::{LOGS, STORAGE},
         root, teleplot,
     },
@@ -121,21 +117,6 @@ enum Action {
     },
 }
 
-impl Action {
-    fn init(self) -> Result<Self, fern::InitError> {
-        if let Action::Serve = &self {
-            let logs = root().join(LOGS);
-            if !std::fs::exists(&logs)? {
-                std::fs::create_dir_all(logs)?;
-            }
-            file_logger()?;
-        } else {
-            cli_logger()?;
-        }
-        Ok(self)
-    }
-}
-
 #[derive(Subcommand)]
 enum DbCommand {
     /// store a value in an actors kv-store
@@ -180,7 +161,7 @@ enum TickCommand {
     Now,
 }
 
-async fn handle_response(response: Response) {
+async fn handle_response(_client: EosServiceClient, response: Response) {
     match response {
         Response::Done => {
             println!("Command executed successfully");
@@ -197,15 +178,15 @@ async fn handle_response(response: Response) {
     }
 }
 
-async fn spawn_actor(client: &EosServiceClient, props: Props) -> anyhow::Result<()> {
+async fn spawn_actor(client: EosServiceClient, props: Props) -> anyhow::Result<()> {
     let response = client.spawn(context::current(), props).await?;
-    handle_response(response).await;
+    handle_response(client, response).await;
     Ok(())
 }
 
-async fn list(client: &EosServiceClient) -> anyhow::Result<()> {
+async fn list(client: EosServiceClient) -> anyhow::Result<()> {
     let response = client.list(context::current()).await?;
-    handle_response(response).await;
+    handle_response(client, response).await;
     Ok(())
 }
 
@@ -219,53 +200,28 @@ async fn client() -> anyhow::Result<EosServiceClient> {
     Ok(EosServiceClient::new(client::Config::default(), transport.await?).spawn())
 }
 
-fn cli_logger() -> Result<(), fern::InitError> {
-    fern::Dispatch::new()
-        .format(|out, message, record| {
-            out.finish(format_args!(
-                "[{} {} {}] {}",
-                humantime::format_rfc3339_seconds(SystemTime::now()),
-                record.level(),
-                record.target(),
-                message
-            ))
-        })
-        .level(log::LevelFilter::Info)
-        .level_for("tarpc", log::LevelFilter::Error)
-        .chain(std::io::stdout())
-        .apply()?;
-    Ok(())
-}
-
-fn file_logger() -> Result<(), fern::InitError> {
-    fern::Dispatch::new()
-        .format(|out, message, record| {
-            out.finish(format_args!(
-                "[{} {} {}] {}",
-                humantime::format_rfc3339_seconds(SystemTime::now()),
-                record.level(),
-                record.target(),
-                message
-            ))
-        })
-        .level(log::LevelFilter::Info)
-        .level_for("rs9p", log::LevelFilter::Warn)
-        // .level_for("tarpc", log::LevelFilter::Error)
-        .chain(std::io::stdout())
-        .chain(fern::DateBased::new("/explore/logs/eos.log.", "%Y-%m-%d"))
-        .apply()?;
-    Ok(())
-}
-
-async fn send_shutdown(client: &EosServiceClient) -> anyhow::Result<()> {
+async fn send_shutdown(client: EosServiceClient) -> anyhow::Result<()> {
     let response = client.shutdown(context::current()).await?;
-    handle_response(response).await;
+    handle_response(client, response).await;
     Ok(())
+}
+
+struct OptionDropper<T>(Option<T>);
+
+impl<T> Drop for OptionDropper<T> {
+    fn drop(&mut self) {
+        if let Some(value) = self.0.take() {
+            drop(value);
+        }
+    }
 }
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    tracing_subscriber::fmt::init();
+    tokio::spawn(async {
+        tokio::signal::ctrl_c().await.unwrap();
+        std::process::exit(0);
+    });
 
     #[cfg(feature = "_setup")]
     {
@@ -276,7 +232,24 @@ async fn main() -> anyhow::Result<()> {
     }
 
     let Cli { command } = Cli::parse();
-    match command.init()? {
+
+    let _log_guard = if let Action::Serve = &command {
+        let logs = root().join(LOGS);
+        if !std::fs::exists(&logs)? {
+            std::fs::create_dir_all(logs)?;
+        }
+        let file_appender = tracing_appender::rolling::hourly(LOGS, "eos.log");
+        let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
+        tracing_subscriber::fmt().with_writer(non_blocking).init();
+        OptionDropper(Some(guard))
+    } else {
+        tracing_subscriber::fmt()
+            .with_writer(std::io::stdout)
+            .init();
+        OptionDropper(None)
+    };
+
+    match command {
         Action::Root => {
             println!("{}", root().display())
         }
@@ -318,11 +291,11 @@ async fn main() -> anyhow::Result<()> {
             ))
             .await?;
             let client = client().await?;
-            spawn_actor(&client, Props { id, script }).await?;
+            spawn_actor(client, Props { id, script }).await?;
         }
         Action::List => {
             let client = client().await?;
-            list(&client).await?;
+            list(client).await?;
         }
         Action::Send { path, msg, sender } => {
             let id = path
@@ -339,7 +312,7 @@ async fn main() -> anyhow::Result<()> {
             };
             let client = client().await?;
             let response = client.send(context::current(), msg).await?;
-            handle_response(response).await;
+            handle_response(client, response).await;
         }
         Action::Kill { paths } => {
             let ids: Result<Vec<_>, _> = paths
@@ -353,7 +326,7 @@ async fn main() -> anyhow::Result<()> {
 
             let client = client().await?;
             let response = client.kill(context::current(), ids?).await?;
-            handle_response(response).await;
+            handle_response(client, response).await;
         }
         Action::Pause { path } => {
             let id = match path {
@@ -368,7 +341,7 @@ async fn main() -> anyhow::Result<()> {
 
             let client = client().await?;
             let response = client.pause(context::current(), id).await?;
-            handle_response(response).await;
+            handle_response(client, response).await;
         }
         Action::Unpause { path } => {
             let id = match path {
@@ -383,22 +356,22 @@ async fn main() -> anyhow::Result<()> {
 
             let client = client().await?;
             let response = client.unpause(context::current(), id).await?;
-            handle_response(response).await;
+            handle_response(client, response).await;
         }
         Action::Tick { command } => {
             let client = client().await?;
             match command {
                 TickCommand::Now => {
                     let response = client.tick(context::current()).await?;
-                    handle_response(response).await;
+                    handle_response(client, response).await;
                 }
                 TickCommand::Reset => {
                     let response = client.reset_tick(context::current()).await?;
-                    handle_response(response).await;
+                    handle_response(client, response).await;
                 }
                 TickCommand::Set { milliseconds } => {
                     let response = client.set_tick(context::current(), milliseconds).await?;
-                    handle_response(response).await;
+                    handle_response(client, response).await;
                 }
             }
         }
@@ -417,11 +390,28 @@ async fn main() -> anyhow::Result<()> {
         }
         Action::Shutdown => {
             let client = client().await?;
-            send_shutdown(&client).await?;
+            send_shutdown(client).await?;
         }
         Action::Serve => {
+            tokio::spawn(async {
+                tokio::signal::ctrl_c().await.unwrap();
+                std::process::exit(0);
+            });
+
             let config = Arc::new(RwLock::new(Config { tick: DEFAULT_TICK }));
             let sys = Arc::new(RwLock::new(System::new()));
+
+            {
+                tokio::spawn(async move {
+                    loop {
+                        tokio::time::sleep(Duration::from_secs(2)).await;
+                        if tokio::fs::try_exists(KILL_FILE).await.unwrap() {
+                            tokio::fs::remove_file(KILL_FILE).await.unwrap();
+                            std::process::exit(0);
+                        }
+                    }
+                });
+            }
 
             {
                 let sys = sys.clone();

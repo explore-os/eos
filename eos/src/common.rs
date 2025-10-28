@@ -17,6 +17,7 @@ pub mod dirs {
     pub const LOGS: &str = "logs";
     pub const STORAGE: &str = "storage";
 }
+pub const KILL_FILE: &str = "/tmp/eos_kill";
 pub const EOS_SOCKET: &str = "/tmp/eos:0";
 pub const RPC_SOCKET: &str = "/tmp/eos_rpc:0";
 pub const DEFAULT_TICK: u64 = 2000;
