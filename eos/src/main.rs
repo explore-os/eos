@@ -220,14 +220,19 @@ struct Config {
 }
 
 async fn respond(client: &Client, session_id: String, response: Response) -> anyhow::Result<()> {
+    let payload = match serde_json::to_vec(&response) {
+        Ok(vec) => vec,
+        Err(e) => {
+            log::error!("Failed to serialize response: {e}");
+            return Err(e.into());
+        }
+    };
+
     if let Err(e) = client
-        .publish(
-            format!("eos.response.{session_id}"),
-            Bytes::from(serde_json::to_vec(&response).unwrap()),
-        )
+        .publish(format!("eos.response.{session_id}"), Bytes::from(payload))
         .await
     {
-        log::error!("{e}");
+        log::error!("Failed to publish response: {e}");
     }
     Ok(())
 }
@@ -336,90 +341,107 @@ async fn main() -> anyhow::Result<()> {
                 shellexpand::full(&script.display().to_string())?.to_string(),
             ))
             .await?;
-            spawn_actor(
-                client().await.expect("Could not connect to server"),
-                Props { id, script },
-            )
-            .await?;
+            let client = client()
+                .await
+                .ok_or_else(|| anyhow::anyhow!("Could not connect to server"))?;
+            spawn_actor(client, Props { id, script }).await?;
         }
         Action::List => {
-            list(client().await.expect("Could not connect to server")).await?;
+            let client = client()
+                .await
+                .ok_or_else(|| anyhow::anyhow!("Could not connect to server"))?;
+            list(client).await?;
         }
         Action::Send { path, msg, sender } => {
             let id = path
                 .file_name()
-                .expect("Invalid path!")
+                .ok_or_else(|| anyhow::anyhow!("Invalid path: no file name found"))?
                 .display()
                 .to_string();
             let sender = sender.map(|sender| {
                 sender
                     .file_name()
-                    .expect("Invalid path!")
-                    .display()
-                    .to_string()
+                    .map(|name| name.display().to_string())
+                    .unwrap_or_else(|| {
+                        log::warn!("Invalid sender path, using empty string");
+                        String::new()
+                    })
             });
             let msg = Message {
                 from: sender,
                 to: id,
                 payload: serde_json::from_str(&msg)?,
             };
-            send(
-                client().await.expect("Could not connect to server"),
-                common::Command::Send(msg),
-            )
-            .await?;
+            let client = client()
+                .await
+                .ok_or_else(|| anyhow::anyhow!("Could not connect to server"))?;
+            send(client, common::Command::Send(msg)).await?;
         }
         Action::Kill { paths } => {
-            send(
-                client().await.expect("Could not connect to server"),
-                common::Command::Kill {
-                    ids: paths
-                        .iter()
-                        .map(|p| p.file_name().unwrap().display().to_string())
-                        .collect(),
-                },
-            )
-            .await?;
+            let ids: Result<Vec<_>, _> = paths
+                .iter()
+                .map(|p| {
+                    p.file_name()
+                        .ok_or_else(|| anyhow::anyhow!("Invalid path: no file name found"))
+                        .map(|name| name.display().to_string())
+                })
+                .collect();
+
+            let client = client()
+                .await
+                .ok_or_else(|| anyhow::anyhow!("Could not connect to server"))?;
+            send(client, common::Command::Kill { ids: ids? }).await?;
         }
         Action::Pause { path } => {
-            send(
-                client().await.expect("Could not connect to server"),
-                common::Command::Pause {
-                    id: path.map(|p| p.file_name().unwrap().display().to_string()),
-                },
-            )
-            .await?;
+            let id = match path {
+                Some(p) => Some(
+                    p.file_name()
+                        .ok_or_else(|| anyhow::anyhow!("Invalid path: no file name found"))?
+                        .display()
+                        .to_string(),
+                ),
+                None => None,
+            };
+
+            let client = client()
+                .await
+                .ok_or_else(|| anyhow::anyhow!("Could not connect to server"))?;
+            send(client, common::Command::Pause { id }).await?;
         }
         Action::Unpause { path } => {
-            send(
-                client().await.expect("Could not connect to server"),
-                common::Command::Unpause {
-                    id: path.map(|p| p.file_name().unwrap().display().to_string()),
-                },
-            )
-            .await?;
+            let id = match path {
+                Some(p) => Some(
+                    p.file_name()
+                        .ok_or_else(|| anyhow::anyhow!("Invalid path: no file name found"))?
+                        .display()
+                        .to_string(),
+                ),
+                None => None,
+            };
+
+            let client = client()
+                .await
+                .ok_or_else(|| anyhow::anyhow!("Could not connect to server"))?;
+            send(client, common::Command::Unpause { id }).await?;
         }
         Action::Tick { command } => match command {
             TickCommand::Now => {
-                send(
-                    client().await.expect("Could not connect to server"),
-                    common::Command::Tick,
-                )
-                .await?;
+                let client = client()
+                    .await
+                    .ok_or_else(|| anyhow::anyhow!("Could not connect to server"))?;
+                send(client, common::Command::Tick).await?;
             }
             TickCommand::Reset => {
-                send(
-                    client().await.expect("Could not connect to server"),
-                    common::Command::ResetTick,
-                )
-                .await?;
+                let client = client()
+                    .await
+                    .ok_or_else(|| anyhow::anyhow!("Could not connect to server"))?;
+                send(client, common::Command::ResetTick).await?;
             }
             TickCommand::Set { milliseconds } => {
-                send(
-                    client().await.expect("Could not connect to server"),
-                    common::Command::SetTick { tick: milliseconds },
-                )
-                .await?;
+                let client = client()
+                    .await
+                    .ok_or_else(|| anyhow::anyhow!("Could not connect to server"))?;
+                send(client, common::Command::SetTick { tick: milliseconds }).await?;
             }
         },
         Action::Plot { value } => {
@@ -429,10 +451,15 @@ async fn main() -> anyhow::Result<()> {
             print!("{EOS_SOCKET}");
         }
         Action::Shutdown => {
-            send_shutdown(client().await.expect("Could not connect to server")).await?;
+            let client = client()
+                .await
+                .ok_or_else(|| anyhow::anyhow!("Could not connect to server"))?;
+            send_shutdown(client).await?;
         }
         Action::Serve => {
-            send_shutdown(client().await.expect("Could not connect to server")).await?;
+            if let Some(client) = client().await {
+                let _ = send_shutdown(client).await;
+            }
             tokio::time::sleep(Duration::from_millis(500)).await;
             let config = Arc::new(RwLock::new(Config { tick: DEFAULT_TICK }));
             let sys = Arc::new(RwLock::new(System::new()));
@@ -442,22 +469,35 @@ async fn main() -> anyhow::Result<()> {
                 let sys = sys.clone();
                 spawn(async move {
                     if let Ok(client) = async_nats::connect(NATS_URL).await {
-                        let mut subscriber = client.subscribe(EOS_CTL).await.unwrap();
+                        let mut subscriber = match client.subscribe(EOS_CTL).await {
+                            Ok(sub) => sub,
+                            Err(e) => {
+                                log::error!("Failed to subscribe to {}: {}", EOS_CTL, e);
+                                return;
+                            }
+                        };
                         spawn(async move {
                             while let Some(message) = subscriber.next().await {
                                 match serde_json::from_slice::<common::Request>(&message.payload) {
                                     Ok(Request { session_id, cmd }) => {
                                         let response = match cmd {
                                             common::Command::Shutdown => {
-                                                respond(&client, session_id, Response::Done)
-                                                    .await
-                                                    .unwrap();
+                                                if let Err(e) =
+                                                    respond(&client, session_id, Response::Done)
+                                                        .await
+                                                {
+                                                    log::error!(
+                                                        "Failed to respond to shutdown command: {}",
+                                                        e
+                                                    );
+                                                }
 
-                                                nix::sys::signal::kill(
+                                                if let Err(e) = nix::sys::signal::kill(
                                                     nix::unistd::getpid(),
                                                     nix::sys::signal::Signal::SIGTERM,
-                                                )
-                                                .unwrap();
+                                                ) {
+                                                    log::error!("Failed to send SIGTERM: {}", e);
+                                                }
                                                 std::process::exit(0);
                                             }
                                             common::Command::Rename { old, new } => {
@@ -558,7 +598,10 @@ async fn main() -> anyhow::Result<()> {
                                                 Response::Actors { actors }
                                             }
                                         };
-                                        respond(&client, session_id, response).await.unwrap();
+                                        if let Err(e) = respond(&client, session_id, response).await
+                                        {
+                                            log::error!("Failed to send response: {}", e);
+                                        }
                                     }
                                     Err(e) => log::error!("Invalid message format: {e}"),
                                 };
@@ -584,20 +627,31 @@ async fn main() -> anyhow::Result<()> {
             spawn(async {
                 loop {
                     tokio::time::sleep(Duration::from_millis(100)).await;
-                    if tokio::fs::try_exists(EOS_SOCKET).await.unwrap() {
-                        _ = tokio::process::Command::new("sudo")
-                            .arg("mount")
-                            .arg("-t")
-                            .arg("9p")
-                            .arg("-o")
-                            .arg(format!(
-                                "version=9p2000.L,trans=unix,uname={}",
-                                std::env::var("USER").unwrap_or_else(|_| s!("vscode"))
-                            ))
-                            .arg(EOS_SOCKET)
-                            .arg("/explore/system")
-                            .spawn();
-                        break;
+                    match tokio::fs::try_exists(EOS_SOCKET).await {
+                        Ok(true) => {
+                            match tokio::process::Command::new("sudo")
+                                .arg("mount")
+                                .arg("-t")
+                                .arg("9p")
+                                .arg("-o")
+                                .arg(format!(
+                                    "version=9p2000.L,trans=unix,uname={}",
+                                    std::env::var("USER").unwrap_or_else(|_| s!("vscode"))
+                                ))
+                                .arg(EOS_SOCKET)
+                                .arg("/explore/system")
+                                .spawn()
+                            {
+                                Ok(_) => log::info!("Successfully mounted 9p filesystem"),
+                                Err(e) => log::error!("Failed to mount 9p filesystem: {}", e),
+                            }
+                            break;
+                        }
+                        Ok(false) => continue,
+                        Err(e) => {
+                            log::error!("Failed to check if {} exists: {}", EOS_SOCKET, e);
+                            tokio::time::sleep(Duration::from_secs(1)).await;
+                        }
                     }
                 }
             });

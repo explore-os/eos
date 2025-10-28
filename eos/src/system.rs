@@ -72,15 +72,6 @@ pub struct Actor {
     pub paused: bool,
 }
 
-impl From<Message> for InternalMessage {
-    fn from(value: Message) -> Self {
-        InternalMessage {
-            sender: value.from,
-            payload: serde_json::from_value(value.payload).unwrap(),
-        }
-    }
-}
-
 impl Actor {
     pub async fn new(id: &str, script: &str) -> EosResult<Self> {
         let state = init(id, &script).await?;
@@ -207,14 +198,28 @@ async fn make_vm(id: &str, script: &str) -> EosResult<rune::Vm> {
     {
         let id = id.to_owned();
         m.function("send", move |to: &str, value: rune::Value| {
-            if let Some(this) = SYSTEM.write().unwrap().actors.get_mut(&id) {
-                this.send_queue.push_back(Message {
-                    from: Some(id.to_owned()),
-                    to: to.to_owned(),
-                    payload: serde_json::to_value(value).unwrap(),
-                });
-            } else {
-                log::warn!("Actor died after sending a message");
+            match SYSTEM.write() {
+                Ok(mut system) => {
+                    if let Some(this) = system.actors.get_mut(&id) {
+                        match serde_json::to_value(value) {
+                            Ok(payload) => {
+                                this.send_queue.push_back(Message {
+                                    from: Some(id.to_owned()),
+                                    to: to.to_owned(),
+                                    payload,
+                                });
+                            }
+                            Err(e) => {
+                                log::error!("Failed to serialize message payload: {}", e);
+                            }
+                        }
+                    } else {
+                        log::warn!("Actor died after sending a message");
+                    }
+                }
+                Err(e) => {
+                    log::error!("Failed to acquire write lock on SYSTEM: {}", e);
+                }
             }
         })
         .build()?;
