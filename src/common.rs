@@ -16,25 +16,11 @@ lazy_static! {
 pub mod dirs {
     pub const LOGS: &str = "logs";
     pub const STORAGE: &str = "storage";
-    #[cfg(feature = "docker")]
-    pub const MOUNT: &str = "system";
-    #[cfg(not(feature = "docker"))]
-    pub const MOUNT: &str = "eos_mnt";
 }
 pub const KILL_FILE: &str = "/tmp/eos_kill";
-pub const EOS_9P_PORT: u16 = 9098;
-pub const EOS_RPC_PORT: u16 = 9097;
+pub const EOS_9P_PORT: u16 = 7797;
+pub const EOS_RPC_PORT: u16 = 7780;
 pub const DEFAULT_TICK: u64 = 2000;
-
-#[cfg(feature = "docker")]
-const ROOT: &str = "/explore";
-
-#[cfg(not(feature = "docker"))]
-const ROOT: &str = "/tmp";
-
-pub fn root() -> PathBuf {
-    PathBuf::from(ROOT)
-}
 
 const TELEPLOT_ADDR: &str = "127.0.0.1:47269";
 const TABLE: TableDefinition<&str, String> = TableDefinition::new("DATA");

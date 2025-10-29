@@ -1525,9 +1525,9 @@ dependencies = [
 
 [[package]]
 name = "rs9p"
-version = "0.12.0"
+version = "0.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "f8aae2fae54841b536519541cdfd7ef43567993d62bcbacc64e85003b981af67"
+checksum = "b3c0f0c59efe2b13eb2644b2b95c43d6a0bebeb09becd05fa844bd2ee1add7b6"
 dependencies = [
  "async-trait",
  "bitflags",

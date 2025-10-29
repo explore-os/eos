@@ -16,8 +16,8 @@ RUN cargo build --release --features docker
 FROM mcr.microsoft.com/vscode/devcontainers/base:debian AS runtime
 
 RUN apt-get update && \
-        apt-get install -y --no-install-recommends git ca-certificates curl fish bash sudo && \
-        rm -rf /var/lib/apt/lists/*
+    apt-get install -y --no-install-recommends git ca-certificates curl fish bash sudo && \
+    rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY --from=builder /app/target/release/eos /usr/local/bin
@@ -34,13 +34,12 @@ COPY --from=builder /app/examples /explore/examples
 COPY --from=builder /app/demos /explore/demos
 RUN chmod +x /explore/demos/*
 
-COPY mount-eos.sh /
 COPY --from=builder /app/docker-entrypoint.sh /
 RUN chmod +x /docker-entrypoint.sh
 
 RUN mkdir -p /etc/fish/completions && \
-        /setup /etc/fish/completions && \
-        rm /setup
+    /setup /etc/fish/completions && \
+    rm /setup
 
 RUN mkdir -p /explore/system
 RUN chown -R vscode:vscode /explore

@@ -1,4 +1,8 @@
-use std::{net::Ipv4Addr, path::PathBuf, sync::Arc, time::Duration};
+use std::{
+    path::{Path, PathBuf},
+    sync::Arc,
+    time::Duration,
+};
 
 use anyhow::bail;
 
@@ -19,8 +23,8 @@ use tokio::sync::RwLock;
 use crate::{
     common::{
         DEFAULT_TICK, EOS_9P_PORT, EOS_RPC_PORT, KILL_FILE,
-        dirs::{LOGS, MOUNT, STORAGE},
-        root, teleplot,
+        dirs::{LOGS, STORAGE},
+        teleplot,
     },
     file_overlay::FsOverlay,
     system::System,
@@ -56,17 +60,15 @@ enum SockType {
 
 #[derive(Subcommand)]
 enum Action {
-    /// prints the root of the filesystem
-    Root,
     /// shuts down the system
     Shutdown,
     /// starts the system
     Serve {
-        /// if and where to mount its internal state
         mount: Option<PathBuf>,
+        /// if and where to mount its internal state
+        #[arg(default_value = "tcp!127.0.0.1!7797")]
+        endpoint: String,
     },
-    /// prints the port used by 9p
-    Port,
     /// spawn an actor
     Spawn {
         /// the requested id for the actor
@@ -388,7 +390,7 @@ async fn main() -> anyhow::Result<()> {
     let Cli { command } = Cli::parse();
 
     let _log_guard = if command.is_serve() {
-        let logs = root().join(LOGS);
+        let logs = LOGS;
         if !std::fs::exists(&logs)? {
             std::fs::create_dir_all(logs)?;
         }
@@ -404,11 +406,8 @@ async fn main() -> anyhow::Result<()> {
     };
 
     match command {
-        Action::Root => {
-            println!("{}", root().display())
-        }
         Action::Db { name, command } => {
-            let storage = root().join(STORAGE);
+            let storage = Path::new(STORAGE);
             let db = common::Db::new(&storage, &name);
             match command {
                 DbCommand::Store { key, value } => {
@@ -514,13 +513,10 @@ async fn main() -> anyhow::Result<()> {
         Action::Plot { value } => {
             common::teleplot(&value)?;
         }
-        Action::Port => {
-            print!("{EOS_9P_PORT}");
-        }
         Action::Shutdown => {
             rpc0("shutdown").await?;
         }
-        Action::Serve { mount } => {
+        Action::Serve { mount, endpoint } => {
             tokio::spawn(async {
                 tokio::signal::ctrl_c().await.unwrap();
                 std::process::exit(0);
@@ -530,14 +526,10 @@ async fn main() -> anyhow::Result<()> {
             let sys = Arc::new(RwLock::new(System::new()));
 
             {
+                let endpoint = endpoint.clone();
                 let sys = sys.clone();
                 tokio::spawn(async move {
-                    srv_async(
-                        FsOverlay::new(sys),
-                        &format!("tcp!{}!{EOS_9P_PORT}", Ipv4Addr::LOCALHOST),
-                    )
-                    .await
-                    .unwrap();
+                    srv_async(FsOverlay::new(sys), &endpoint).await.unwrap();
                     std::process::exit(0);
                 });
             }
@@ -568,50 +560,83 @@ async fn main() -> anyhow::Result<()> {
                 });
             }
 
-            if let Some(mount) = mount {
+            {
+                let endpoint = endpoint.clone();
                 tokio::spawn(async move {
-                    let mnt = root().join(MOUNT);
-
-                    for _ in 0..5 {
-                        if let Ok(mut c) = tokio::process::Command::new("sudo")
-                            .arg("umount")
-                            .arg(&mount)
-                            .spawn()
-                        {
-                            if let Ok(_) = c.wait().await {
-                                tracing::info!("Successfully unmounted previous 9p filesystem");
-                                break;
+                    if let Some(mount) = mount {
+                        for _ in 0..5 {
+                            if let Ok(mut c) = tokio::process::Command::new("sudo")
+                                .arg("umount")
+                                .arg(&endpoint)
+                                .spawn()
+                            {
+                                if let Ok(_) = c.wait().await {
+                                    tracing::info!("Successfully unmounted previous 9p filesystem");
+                                    break;
+                                }
                             }
                         }
-                    }
-
-                    if !tokio::fs::try_exists(&mnt).await.unwrap() {
-                        tokio::fs::create_dir_all(&mnt)
-                            .await
-                            .expect("Could not create mnt dir!");
-                    }
-                    tracing::info!("Mounting 9p filesystem utilizing sudo");
-                    loop {
-                        tokio::time::sleep(Duration::from_millis(500)).await;
-                        match tokio::process::Command::new("sudo")
-                            .arg("mount")
-                            .arg("-t")
-                            .arg("9p")
-                            .arg("-o")
-                            .arg(format!(
-                                "version=9p2000.L,trans=tcp,port={EOS_9P_PORT},uname={}",
-                                std::env::var("USER").unwrap_or_else(|_| s!("vscode"))
-                            ))
-                            .arg(format!("{}", Ipv4Addr::LOCALHOST))
-                            .arg(&mnt)
-                            .spawn()
-                        {
-                            Ok(_) => {
-                                tracing::info!("Successfully mounted 9p filesystem");
-                                break;
-                            }
-                            Err(e) => {
-                                tracing::error!("Failed to mount 9p filesystem: {}, retrying...", e)
+                        tracing::info!("Mounting 9p filesystem utilizing sudo");
+                        let (proto, addr, port) =
+                            rs9p::utils::parse_proto(&endpoint).expect("Failed to parse endpoint");
+                        loop {
+                            tokio::time::sleep(Duration::from_millis(500)).await;
+                            match proto {
+                                "tcp" => {
+                                    match tokio::process::Command::new("sudo")
+                                        .arg("mount")
+                                        .arg("-t")
+                                        .arg("9p")
+                                        .arg("-o")
+                                        .arg(format!(
+                                            "version=9p2000.L,trans=tcp,port={port},uname={}",
+                                            std::env::var("USER").unwrap_or_else(|_| s!("vscode"))
+                                        ))
+                                        .arg(format!("{}", addr))
+                                        .arg(&mount)
+                                        .spawn()
+                                    {
+                                        Ok(_) => {
+                                            tracing::info!("Successfully mounted 9p filesystem");
+                                            break;
+                                        }
+                                        Err(e) => {
+                                            tracing::error!(
+                                                "Failed to mount 9p filesystem: {}, retrying...",
+                                                e
+                                            )
+                                        }
+                                    }
+                                }
+                                "unix" => {
+                                    match tokio::process::Command::new("sudo")
+                                        .arg("mount")
+                                        .arg("-t")
+                                        .arg("9p")
+                                        .arg("-o")
+                                        .arg(format!(
+                                            "version=9p2000.L,trans=unix,uname={}",
+                                            std::env::var("USER").unwrap_or_else(|_| s!("vscode"))
+                                        ))
+                                        .arg(format!("{addr}:{port}"))
+                                        .arg(&mount)
+                                        .spawn()
+                                    {
+                                        Ok(_) => {
+                                            tracing::info!("Successfully mounted 9p filesystem");
+                                            break;
+                                        }
+                                        Err(e) => {
+                                            tracing::error!(
+                                                "Failed to mount 9p filesystem: {}, retrying...",
+                                                e
+                                            )
+                                        }
+                                    }
+                                }
+                                _ => {
+                                    panic!("Unsupported protocol");
+                                }
                             }
                         }
                     }
