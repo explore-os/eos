@@ -22,7 +22,7 @@ use tokio::sync::RwLock;
 
 use crate::{
     common::{
-        DEFAULT_TICK, EOS_9P_PORT, EOS_RPC_PORT, KILL_FILE,
+        DEFAULT_TICK, EOS_RPC_PORT, KILL_FILE,
         dirs::{LOGS, STORAGE},
         teleplot,
     },

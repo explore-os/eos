@@ -18,6 +18,7 @@ pub mod dirs {
     pub const STORAGE: &str = "storage";
 }
 pub const KILL_FILE: &str = "/tmp/eos_kill";
+#[allow(dead_code)]
 pub const EOS_9P_PORT: u16 = 7797;
 pub const EOS_RPC_PORT: u16 = 7780;
 pub const DEFAULT_TICK: u64 = 2000;
