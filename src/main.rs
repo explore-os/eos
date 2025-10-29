@@ -1,4 +1,4 @@
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{net::Ipv4Addr, path::PathBuf, sync::Arc, time::Duration};
 
 use anyhow::bail;
 
@@ -8,17 +8,17 @@ use clap::Command;
 use clap::{Parser, Subcommand};
 use common::{Message, Props, Response};
 
+use rs9p::srv::srv_async;
 use serde::Serialize;
 use stringlit::s;
 
 #[cfg(feature = "_setup")]
 use clap_complete::{aot::Fish, generate_to};
-use rs9p::srv::srv_async_unix;
 use tokio::sync::RwLock;
 
 use crate::{
     common::{
-        DEFAULT_TICK, EOS_SOCKET, KILL_FILE, RPC_PORT,
+        DEFAULT_TICK, EOS_9P_PORT, EOS_RPC_PORT, KILL_FILE,
         dirs::{LOGS, MOUNT, STORAGE},
         root, teleplot,
     },
@@ -65,8 +65,8 @@ enum Action {
         /// if and where to mount its internal state
         mount: Option<PathBuf>,
     },
-    /// prints the path to the socket used by 9p
-    Sock,
+    /// prints the port used by 9p
+    Port,
     /// spawn an actor
     Spawn {
         /// the requested id for the actor
@@ -303,7 +303,7 @@ async fn rpc0(endpoint: &str) -> anyhow::Result<()> {
     let client = reqwest::Client::new();
     let response: Response = serde_json::from_str(
         &client
-            .post(format!("http://localhost:{RPC_PORT}/{endpoint}"))
+            .post(format!("http://localhost:{EOS_RPC_PORT}/{endpoint}"))
             .send()
             .await?
             .text()
@@ -331,7 +331,7 @@ async fn rpc<T: Serialize>(endpoint: &str, data: &T) -> anyhow::Result<()> {
     let client = reqwest::Client::new();
     let response: Response = serde_json::from_str(
         &client
-            .post(format!("http://localhost:{RPC_PORT}/{endpoint}"))
+            .post(format!("http://localhost:{EOS_RPC_PORT}/{endpoint}"))
             .json(data)
             .send()
             .await?
@@ -514,8 +514,8 @@ async fn main() -> anyhow::Result<()> {
         Action::Plot { value } => {
             common::teleplot(&value)?;
         }
-        Action::Sock => {
-            print!("{EOS_SOCKET}");
+        Action::Port => {
+            print!("{EOS_9P_PORT}");
         }
         Action::Shutdown => {
             rpc0("shutdown").await?;
@@ -528,6 +528,19 @@ async fn main() -> anyhow::Result<()> {
 
             let config = Arc::new(RwLock::new(Config { tick: DEFAULT_TICK }));
             let sys = Arc::new(RwLock::new(System::new()));
+
+            {
+                let sys = sys.clone();
+                tokio::spawn(async move {
+                    srv_async(
+                        FsOverlay::new(sys),
+                        &format!("tcp!{}!{EOS_9P_PORT}", Ipv4Addr::LOCALHOST),
+                    )
+                    .await
+                    .unwrap();
+                    std::process::exit(0);
+                });
+            }
 
             {
                 tokio::spawn(async move {
@@ -555,71 +568,50 @@ async fn main() -> anyhow::Result<()> {
                 });
             }
 
-            {
-                // Remove existing socket if it exists
-                let _ = tokio::fs::remove_file(EOS_SOCKET).await;
-                let sys = sys.clone();
-                tokio::spawn(async move {
-                    srv_async_unix(FsOverlay::new(sys), EOS_SOCKET)
-                        .await
-                        .unwrap();
-                    std::process::exit(0);
-                });
-            }
-
             if let Some(mount) = mount {
                 tokio::spawn(async move {
-                    loop {
-                        tokio::time::sleep(Duration::from_millis(100)).await;
-                        match tokio::fs::try_exists(EOS_SOCKET).await {
-                            Ok(true) => {
-                                let mnt = root().join(MOUNT);
+                    let mnt = root().join(MOUNT);
 
-                                for _ in 0..5 {
-                                    if let Ok(mut c) = tokio::process::Command::new("sudo")
-                                        .arg("umount")
-                                        .arg(&mount)
-                                        .spawn()
-                                    {
-                                        if let Ok(_) = c.wait().await {
-                                            tracing::info!(
-                                                "Successfully unmounted previous 9p filesystem"
-                                            );
-                                            break;
-                                        }
-                                    }
-                                }
-
-                                if !tokio::fs::try_exists(&mnt).await.unwrap() {
-                                    tokio::fs::create_dir_all(&mnt)
-                                        .await
-                                        .expect("Could not create mnt dir!");
-                                }
-                                tracing::info!("Mounting 9p filesystem utilizing sudo");
-                                match tokio::process::Command::new("sudo")
-                                    .arg("mount")
-                                    .arg("-t")
-                                    .arg("9p")
-                                    .arg("-o")
-                                    .arg(format!(
-                                        "version=9p2000.L,trans=unix,uname={}",
-                                        std::env::var("USER").unwrap_or_else(|_| s!("vscode"))
-                                    ))
-                                    .arg(EOS_SOCKET)
-                                    .arg(mnt)
-                                    .spawn()
-                                {
-                                    Ok(_) => tracing::info!("Successfully mounted 9p filesystem"),
-                                    Err(e) => {
-                                        tracing::error!("Failed to mount 9p filesystem: {}", e)
-                                    }
-                                }
+                    for _ in 0..5 {
+                        if let Ok(mut c) = tokio::process::Command::new("sudo")
+                            .arg("umount")
+                            .arg(&mount)
+                            .spawn()
+                        {
+                            if let Ok(_) = c.wait().await {
+                                tracing::info!("Successfully unmounted previous 9p filesystem");
                                 break;
                             }
-                            Ok(false) => continue,
+                        }
+                    }
+
+                    if !tokio::fs::try_exists(&mnt).await.unwrap() {
+                        tokio::fs::create_dir_all(&mnt)
+                            .await
+                            .expect("Could not create mnt dir!");
+                    }
+                    tracing::info!("Mounting 9p filesystem utilizing sudo");
+                    loop {
+                        tokio::time::sleep(Duration::from_millis(500)).await;
+                        match tokio::process::Command::new("sudo")
+                            .arg("mount")
+                            .arg("-t")
+                            .arg("9p")
+                            .arg("-o")
+                            .arg(format!(
+                                "version=9p2000.L,trans=tcp,port={EOS_9P_PORT},uname={}",
+                                std::env::var("USER").unwrap_or_else(|_| s!("vscode"))
+                            ))
+                            .arg(format!("{}", Ipv4Addr::LOCALHOST))
+                            .arg(&mnt)
+                            .spawn()
+                        {
+                            Ok(_) => {
+                                tracing::info!("Successfully mounted 9p filesystem");
+                                break;
+                            }
                             Err(e) => {
-                                tracing::error!("Failed to check if {} exists: {}", EOS_SOCKET, e);
-                                tokio::time::sleep(Duration::from_secs(1)).await;
+                                tracing::error!("Failed to mount 9p filesystem: {}, retrying...", e)
                             }
                         }
                     }
@@ -645,8 +637,8 @@ async fn main() -> anyhow::Result<()> {
                     .route("/shutdown", post(shutdown))
                     .with_state(state);
 
-                tracing::info!("RPC server listening on port {}", RPC_PORT);
-                let listener = tokio::net::TcpListener::bind(format!("localhost:{}", RPC_PORT))
+                tracing::info!("RPC server listening on port {}", EOS_RPC_PORT);
+                let listener = tokio::net::TcpListener::bind(format!("localhost:{}", EOS_RPC_PORT))
                     .await
                     .unwrap();
                 axum::serve(listener, app).await.unwrap();

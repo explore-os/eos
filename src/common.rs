@@ -22,8 +22,8 @@ pub mod dirs {
     pub const MOUNT: &str = "eos_mnt";
 }
 pub const KILL_FILE: &str = "/tmp/eos_kill";
-pub const EOS_SOCKET: &str = "/tmp/eos:0";
-pub const RPC_PORT: u16 = 9097;
+pub const EOS_9P_PORT: u16 = 9098;
+pub const EOS_RPC_PORT: u16 = 9097;
 pub const DEFAULT_TICK: u64 = 2000;
 
 #[cfg(feature = "docker")]
